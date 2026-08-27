@@ -43,8 +43,14 @@ done.
 git clone <this repository>
 cd PenBridge
 ./Scripts/build-app.sh
-open build/PenBridge.app
+open ~/Applications/PenBridge.app
 ```
+
+The build installs to `~/Applications` rather than leaving the app in `build/`, because
+LaunchServices will not start an app from a volume mounted `nosuid` — which most
+external drives are. It reports that as a launch timeout (`-1712`) rather than as a
+permissions problem, so an app sitting in a checkout on an external disk simply appears
+to be broken. Set `NO_INSTALL=1` to skip the install step.
 
 Or open `Package.swift` in Xcode and run the `PenBridgeApp` scheme.
 

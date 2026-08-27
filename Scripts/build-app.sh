@@ -86,13 +86,31 @@ otool -L "$APP/Contents/MacOS/PenBridge" | grep -q AppKit \
     || { echo "PenBridge does not link AppKit — wrong binary in bundle" >&2; exit 1; }
 codesign --verify --strict "$APP"
 
+SIGNED_BY="$(codesign -dvv "$APP" 2>&1 | grep -E '^Authority=|^Signature=' | head -1 | cut -d= -f2)"
 echo
-echo "Built $APP  (arm64, signed as: $(codesign -dvv "$APP" 2>&1 | grep -E '^Authority=|^Signature=' | head -1 | cut -d= -f2))"
+echo "Built $APP  (arm64, signed as: $SIGNED_BY)"
+
+# LaunchServices refuses to start an app from a volume mounted nosuid — which most
+# external drives are — and reports it as a launch timeout (-1712) rather than as a
+# permissions problem. Running the app from a checkout on an external disk therefore
+# looks like the app is broken. Install it somewhere it can actually run.
+INSTALL_DIR="$HOME/Applications"
+INSTALLED="$INSTALL_DIR/PenBridge.app"
+if [ "${NO_INSTALL:-0}" != "1" ]; then
+    mkdir -p "$INSTALL_DIR"
+    # Replace only our own previous install, never a path given from outside.
+    if [ -d "$INSTALLED" ]; then
+        rm -rf "$INSTALLED"
+    fi
+    cp -R "$APP" "$INSTALLED"
+    echo "Installed to $INSTALLED"
+fi
+
 echo
 echo "Next:"
-echo "  open $APP"
+echo "  open \"$INSTALLED\""
 echo "  Grant Input Monitoring and Accessibility when prompted, then relaunch."
 echo
 echo "Diagnostics:"
-echo "  $APP/Contents/MacOS/penbridge-cli info"
-echo "  $APP/Contents/MacOS/penbridge-cli calibrate"
+echo "  \"$INSTALLED/Contents/MacOS/penbridge-cli\" info"
+echo "  \"$INSTALLED/Contents/MacOS/penbridge-cli\" calibrate"

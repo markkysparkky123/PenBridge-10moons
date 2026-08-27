@@ -37,7 +37,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if !Permissions.allGranted {
-            Permissions.presentMissingAlert()
+            // Deferred deliberately. Running a modal alert inside
+            // applicationDidFinishLaunching blocks the main thread before the app has
+            // checked in with LaunchServices, which times out and reports the launch as
+            // failed (-1712) — the app appears not to start at all, and the dialog
+            // explaining why is the very thing preventing it.
+            DispatchQueue.main.async { Permissions.presentMissingAlert() }
         }
     }
 
