@@ -113,14 +113,34 @@ without any initialization, so nothing needs to be sent to the tablet to make it
 
 Anything in this section is empirical rather than declared, and can differ between units.
 
+Measured on one unit over 1901 samples, tracing all four edges of the drawing area and
+pressing firmly in the centre:
+
 | Property | Declared | Measured |
 |---|---|---|
-| X range | 0…4096 | _to be filled in from `penbridge-cli calibrate`_ |
-| Y range | 0…4096 | _to be filled in_ |
-| Pressure range | 0…2047 | _to be filled in_ |
-| Report rate | — | _to be filled in_ |
+| X range | 0…4096 | **0…4095** |
+| Y range | 0…4096 | **0…4095** |
+| Pressure | 0…2047 | **5…1685** |
 
-Cheap digitizers often under- or over-report their declared maximum, which shows up as
-the cursor stopping short of the screen edge or reaching it too early. Run
-`penbridge-cli calibrate`, trace the physical edges of the active area, and record the
-numbers that stop changing.
+Two things worth knowing:
+
+**The declared maximum is one too high.** The hardware never emits 4096 on either axis.
+Mapping against the declared range leaves the last fraction of a pixel unreachable —
+harmless in itself, but it is a reminder that the descriptor is a claim, not a
+measurement.
+
+**A firm press only reaches 82% of the pressure scale.** With a straight-through
+pressure curve the pen can never produce full pressure, so brushes never reach their
+maximum width or opacity no matter how hard you press. This is the single most
+noticeable difference a calibration makes, and it is why `PressureCurve` carries an
+upper threshold. `penbridge-cli calibrate --apply` sets it from the measurement.
+
+Both figures come from one unit and one hand. Other tablets — and other people —
+will differ, which is why they live in the config rather than in the source.
+
+### The device can wedge
+
+After the vendor driver is killed, the tablet may stop emitting pen reports until it is
+unplugged and reconnected. It enumerates and opens normally in that state, so it looks
+like a software fault when it is not. If the pen goes silent, replug the cable before
+looking anywhere else.

@@ -16,6 +16,8 @@ USAGE
 OPTIONS
   --seize   Take the tablet exclusively, so macOS's own HID driver stops handling it.
             Try this if reports never arrive, or if the cursor appears to be driven twice.
+  --apply   calibrate only: write the measurement into the driver's settings on exit,
+            so the mapper uses the tablet's real limits instead of its declared ones.
 
 All modes run until interrupted with Ctrl-C.
 """
@@ -23,6 +25,7 @@ All modes run until interrupted with Ctrl-C.
 let arguments = CommandLine.arguments.dropFirst()
 let command = arguments.first(where: { !$0.hasPrefix("-") }) ?? "info"
 let seize = arguments.contains("--seize")
+let apply = arguments.contains("--apply")
 guard ["info", "dump", "calibrate", "probe"].contains(command) else {
     print(usage)
     exit(command == "help" || command == "--help" ? 0 : 2)
@@ -116,6 +119,17 @@ final class Extremes {
     var minPressure = Int.max, maxPressure = Int.min
     var samples = 0
 
+    /// Where the result is written, so it survives closing the terminal and can be
+    /// read back without copying numbers by hand.
+    static let outputURL = Settings.storeURL
+        .deletingLastPathComponent()
+        .appendingPathComponent("calibration.json")
+
+    private var lastWrite = Date.distantPast
+    /// Kept so the saved file can record what the descriptor claimed alongside what
+    /// was actually measured.
+    var layout: PenReportLayout?
+
     func record(_ report: PenReport) {
         minX = min(minX, report.x); maxX = max(maxX, report.x)
         minY = min(minY, report.y); maxY = max(maxY, report.y)
@@ -124,6 +138,46 @@ final class Extremes {
             maxPressure = max(maxPressure, report.pressure)
         }
         samples += 1
+
+        // Written as it goes rather than on exit, so a Ctrl-C or a crash still leaves
+        // the measurement behind.
+        if Date().timeIntervalSince(lastWrite) > 0.5 {
+            lastWrite = Date()
+            save(layout: layout)
+        }
+    }
+
+    func save(layout: PenReportLayout? = nil) {
+        guard samples > 0 else { return }
+        var payload: [String: Any] = [
+            "samples": samples,
+            "observed": [
+                "x": ["min": minX, "max": maxX],
+                "y": ["min": minY, "max": maxY],
+                "pressure": [
+                    "min": minPressure == .max ? 0 : minPressure,
+                    "max": maxPressure == .min ? 0 : maxPressure,
+                ],
+            ],
+            "recordedAt": ISO8601DateFormatter().string(from: Date()),
+        ]
+        if let layout {
+            payload["declared"] = [
+                "x": ["min": layout.xRange.lowerBound, "max": layout.xRange.upperBound],
+                "y": ["min": layout.yRange.lowerBound, "max": layout.yRange.upperBound],
+                "pressure": [
+                    "min": layout.pressureRange.lowerBound,
+                    "max": layout.pressureRange.upperBound,
+                ],
+            ]
+        }
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]
+        ) else { return }
+        try? FileManager.default.createDirectory(
+            at: Self.outputURL.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try? data.write(to: Self.outputURL, options: .atomic)
     }
 
     func render(against layout: PenReportLayout) -> String {
@@ -153,9 +207,13 @@ monitor.onAttach = { device in
     case "calibrate":
         print("""
 
-            Drag the pen slowly along all four edges of the active area, then press
-            firmly in the middle. Watch the numbers stop changing — those are the
-            device's true limits, which is what the mapper needs.
+            Drag the pen slowly along all four edges of the drawing area — the marked
+            rectangle only, not any soft-key strip outside it — then press firmly in
+            the middle. Watch the numbers stop changing: those are the device's true
+            limits, which is what the mapper needs.
+
+            Saving continuously to:
+            \(Extremes.outputURL.path)
 
             """)
     default:
@@ -217,6 +275,7 @@ monitor.onReport = { device, reportID, payload in
         ))
     case "calibrate":
         extremes.record(report)
+        extremes.layout = device.layout
         print("\r\(extremes.render(against: device.layout))", terminator: "")
         fflush(stdout)
     default:
@@ -224,9 +283,80 @@ monitor.onReport = { device, reportID, payload in
     }
 }
 
+/// Writes a finished measurement into the driver's settings.
+///
+/// Deliberately conservative: a half-finished sweep would otherwise lock the cursor
+/// into a fraction of the screen, which is worse than trusting the descriptor.
+func applyCalibration() {
+    guard command == "calibrate", apply else { return }
+    guard let layout = extremes.layout, extremes.samples > 200 else {
+        print("\n\nNot enough samples to apply — nothing written.")
+        return
+    }
+
+    let xSpan = extremes.maxX - extremes.minX
+    let ySpan = extremes.maxY - extremes.minY
+    let declaredX = layout.xRange.upperBound - layout.xRange.lowerBound
+    let declaredY = layout.yRange.upperBound - layout.yRange.lowerBound
+    guard xSpan > declaredX / 2, ySpan > declaredY / 2 else {
+        print("""
+
+            The sweep covered only \(xSpan * 100 / max(declaredX, 1))% by \
+            \(ySpan * 100 / max(declaredY, 1))% of the declared range — that looks
+            like an incomplete pass, so nothing was written. Trace all four edges
+            of the drawing area and try again.
+            """)
+        return
+    }
+
+    var settings = Settings.load()
+    settings.calibration = Calibration(
+        xMin: extremes.minX, xMax: extremes.maxX,
+        yMin: extremes.minY, yMax: extremes.maxY
+    )
+
+    // Pressure is expressed as fractions of the declared scale, so it stays meaningful
+    // if the same config is carried to a tablet with a different resolution.
+    let pressureScale = Double(layout.pressureRange.upperBound - layout.pressureRange.lowerBound)
+    if pressureScale > 0, extremes.maxPressure > extremes.minPressure {
+        settings.pressure.lowerThreshold = Double(max(extremes.minPressure, 0)) / pressureScale
+        settings.pressure.upperThreshold = Double(extremes.maxPressure) / pressureScale
+    }
+
+    do {
+        try settings.save()
+        let percent = Int((settings.pressure.upperThreshold * 100).rounded())
+        print("""
+
+
+            Written to \(Settings.storeURL.path)
+
+              X          \(extremes.minX)…\(extremes.maxX)
+              Y          \(extremes.minY)…\(extremes.maxY)
+              Pressure   full scale now reached at \(percent)% of the raw range
+
+            Restart PenBridge for it to take effect.
+            """)
+    } catch {
+        print("\n\nCould not write settings: \(error.localizedDescription)")
+    }
+}
+
 if command == "probe" {
     runEventProbe()
 } else {
+    // Ctrl-C is the normal way to end a calibration run, so it has to be a clean exit
+    // rather than a kill, or --apply would never get the chance to write anything.
+    signal(SIGINT, SIG_IGN)
+    let interrupts = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+    interrupts.setEventHandler {
+        extremes.save(layout: extremes.layout)
+        applyCalibration()
+        print("")
+        exit(0)
+    }
+    interrupts.resume()
+
     monitor.start()
     print("penbridge \(command) — looking for tablets. Ctrl-C to stop.")
 

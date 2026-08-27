@@ -1,6 +1,46 @@
 import CoreGraphics
 import Foundation
 
+/// Measured coordinate limits, overriding what the descriptor claims.
+///
+/// Tablets are routinely inaccurate about their own range — this one declares
+/// `0…4096` on both axes but never reports above 4095. Left unchecked that shows up as
+/// a cursor that cannot quite reach one edge of the screen, or that runs out of tablet
+/// before it gets there. `penbridge-cli calibrate --apply` fills these in from a
+/// measurement; `nil` means "trust the descriptor".
+public struct Calibration: Codable, Equatable, Sendable {
+    public var xMin: Int?
+    public var xMax: Int?
+    public var yMin: Int?
+    public var yMax: Int?
+
+    public init(xMin: Int? = nil, xMax: Int? = nil, yMin: Int? = nil, yMax: Int? = nil) {
+        self.xMin = xMin
+        self.xMax = xMax
+        self.yMin = yMin
+        self.yMax = yMax
+    }
+
+    public func xRange(orDeclared declared: ClosedRange<Int>) -> ClosedRange<Int> {
+        Self.range(xMin, xMax, declared)
+    }
+
+    public func yRange(orDeclared declared: ClosedRange<Int>) -> ClosedRange<Int> {
+        Self.range(yMin, yMax, declared)
+    }
+
+    private static func range(
+        _ low: Int?, _ high: Int?, _ declared: ClosedRange<Int>
+    ) -> ClosedRange<Int> {
+        let lower = low ?? declared.lowerBound
+        let upper = high ?? declared.upperBound
+        // A calibration that survived a bad measurement must not produce an invalid
+        // range and take the cursor with it.
+        guard upper > lower else { return declared }
+        return lower...upper
+    }
+}
+
 /// User-visible configuration, persisted as JSON next to the app's support files.
 public struct Settings: Codable, Equatable, Sendable {
 
@@ -12,6 +52,8 @@ public struct Settings: Codable, Equatable, Sendable {
     /// Display to map onto, by `CGDirectDisplayID`. `nil` means the main display.
     public var displayID: UInt32?
     public var pressure: PressureCurve
+    /// Measured coordinate limits; empty means trust the descriptor.
+    public var calibration: Calibration
     /// Send the barrel switch as a right-click.
     public var barrelSwitchRightClicks: Bool
     /// Master switch for the menu-bar item.
@@ -23,6 +65,7 @@ public struct Settings: Codable, Equatable, Sendable {
         rotation: TabletRotation = .none,
         displayID: UInt32? = nil,
         pressure: PressureCurve = .linear,
+        calibration: Calibration = Calibration(),
         barrelSwitchRightClicks: Bool = true,
         isEnabled: Bool = true
     ) {
@@ -31,8 +74,32 @@ public struct Settings: Codable, Equatable, Sendable {
         self.rotation = rotation
         self.displayID = displayID
         self.pressure = pressure
+        self.calibration = calibration
         self.barrelSwitchRightClicks = barrelSwitchRightClicks
         self.isEnabled = isEnabled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case area, preserveAspectRatio, rotation, displayID, pressure
+        case calibration, barrelSwitchRightClicks, isEnabled
+    }
+
+    /// Decoded field by field so a config written by an older build — one without
+    /// `calibration`, say — still loads instead of falling back to defaults wholesale.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = Settings()
+        area = try container.decodeIfPresent(NormalizedRect.self, forKey: .area) ?? defaults.area
+        preserveAspectRatio = try container.decodeIfPresent(Bool.self, forKey: .preserveAspectRatio)
+            ?? defaults.preserveAspectRatio
+        rotation = try container.decodeIfPresent(TabletRotation.self, forKey: .rotation) ?? defaults.rotation
+        displayID = try container.decodeIfPresent(UInt32.self, forKey: .displayID)
+        pressure = try container.decodeIfPresent(PressureCurve.self, forKey: .pressure) ?? defaults.pressure
+        calibration = try container.decodeIfPresent(Calibration.self, forKey: .calibration)
+            ?? defaults.calibration
+        barrelSwitchRightClicks = try container.decodeIfPresent(Bool.self, forKey: .barrelSwitchRightClicks)
+            ?? defaults.barrelSwitchRightClicks
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? defaults.isEnabled
     }
 
     // MARK: - Persistence

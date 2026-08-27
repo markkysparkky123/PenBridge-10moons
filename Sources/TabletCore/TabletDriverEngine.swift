@@ -124,7 +124,11 @@ public final class TabletDriverEngine {
             let report = device.layout.decode(payload)
         else { return }
 
-        let location = mapper.map(x: report.x, y: report.y, layout: device.layout)
+        let location = mapper.map(
+            x: report.x, y: report.y,
+            xRange: settings.calibration.xRange(orDeclared: device.layout.xRange),
+            yRange: settings.calibration.yRange(orDeclared: device.layout.yRange)
+        )
         let pressure = settings.pressure.apply(report.pressure, range: device.layout.pressureRange)
         synthesizer.handle(report, at: location, pressure: pressure)
     }

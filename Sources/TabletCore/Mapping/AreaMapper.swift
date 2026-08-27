@@ -95,10 +95,20 @@ public struct AreaMapper: Sendable {
         )
     }
 
-    /// Converts one pen sample into a screen point.
+    /// Converts one pen sample into a screen point, using the tablet's declared ranges.
     public func map(x: Int, y: Int, layout: PenReportLayout) -> CGPoint {
-        let normalizedX = normalize(x, in: layout.xRange)
-        let normalizedY = normalize(y, in: layout.yRange)
+        map(x: x, y: y, xRange: layout.xRange, yRange: layout.yRange)
+    }
+
+    /// Converts one pen sample into a screen point against explicit coordinate ranges.
+    ///
+    /// The caller supplies the ranges so a measured calibration can override what the
+    /// descriptor claims — the two disagree more often than not.
+    public func map(
+        x: Int, y: Int, xRange: ClosedRange<Int>, yRange: ClosedRange<Int>
+    ) -> CGPoint {
+        let normalizedX = normalize(x, in: xRange)
+        let normalizedY = normalize(y, in: yRange)
 
         // Restrict to the configured sub-area, then renormalize to 0…1 within it.
         let areaX = area.width > 0 ? (normalizedX - area.minX) / area.width : normalizedX
