@@ -13,6 +13,7 @@ USAGE
   penbridge calibrate   Track the true min/max of X, Y and pressure while you move the pen
   penbridge pressure    Live pressure meter: raw reading, configured band, mapped output
   penbridge probe       Log the tablet events another driver is posting (needs Accessibility)
+  penbridge nsprobe     Open a scratch window and draw in it — shows what an app receives
 
 OPTIONS
   --seize   Take the tablet exclusively, so macOS's own HID driver stops handling it.
@@ -27,7 +28,7 @@ let arguments = CommandLine.arguments.dropFirst()
 let command = arguments.first(where: { !$0.hasPrefix("-") }) ?? "info"
 let seize = arguments.contains("--seize")
 let apply = arguments.contains("--apply")
-guard ["info", "dump", "calibrate", "probe", "pressure"].contains(command) else {
+guard ["info", "dump", "calibrate", "probe", "pressure", "nsprobe"].contains(command) else {
     print(usage)
     exit(command == "help" || command == "--help" ? 0 : 2)
 }
@@ -375,6 +376,8 @@ func applyCalibration() {
 
 if command == "probe" {
     runEventProbe()
+} else if command == "nsprobe" {
+    runNSEventProbe()
 } else {
     // Ctrl-C is the normal way to end a calibration run, so it has to be a clean exit
     // rather than a kill, or --apply would never get the chance to write anything.
