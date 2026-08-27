@@ -29,6 +29,7 @@ public final class TabletDriverEngine {
     public init(settings: Settings = .load()) {
         self.settings = settings
         self.monitor = TabletDeviceMonitor()
+        self.monitor.seizeDevice = settings.seizeDevice
 
         monitor.onAttach = { [weak self] device in self?.attach(device) }
         monitor.onDetach = { [weak self] device in self?.detach(device) }
@@ -112,6 +113,7 @@ public final class TabletDriverEngine {
 
         mapper = AreaMapper(area: area, rotation: settings.rotation, screen: screen)
         synthesizer?.configuration.barrelSwitchRightClicks = settings.barrelSwitchRightClicks
+        monitor.seizeDevice = settings.seizeDevice
 
         if case .running = state, !settings.isEnabled {
             synthesizer?.reset()

@@ -87,6 +87,21 @@ final class StatusItemController {
         barrel.state = settings.barrelSwitchRightClicks ? .on : .off
         menu.addItem(barrel)
 
+        let seize = NSMenuItem(
+            title: "Take exclusive control of the tablet",
+            action: #selector(toggleSeize), keyEquivalent: ""
+        )
+        seize.target = self
+        seize.state = settings.seizeDevice ? .on : .off
+        seize.toolTip = """
+            Stops macOS's own driver from generating plain mouse events from the same \
+            pen. Drawing applications that see ordinary mouse movement arrive in the \
+            middle of a stroke fall back to treating the pen as a mouse and ignore \
+            pressure. While this is on, the tablet does nothing if PenBridge is not \
+            running.
+            """
+        menu.addItem(seize)
+
         menu.addItem(.separator())
         menu.addItem(submenu(
             title: "Rotation",
@@ -140,6 +155,10 @@ final class StatusItemController {
 
     @objc private func toggleBarrel() {
         settings.barrelSwitchRightClicks.toggle()
+    }
+
+    @objc private func toggleSeize() {
+        settings.seizeDevice.toggle()
     }
 
     @objc private func selectRotation(_ sender: NSMenuItem) {

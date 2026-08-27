@@ -203,6 +203,12 @@ public final class TabletEventSynthesizer {
         guard moved || pressureChanged else { return }
         lastPressure = pressure
 
+        var buttonMask: Int64 = 0
+        if report.tipSwitch { buttonMask |= 1 << 0 }
+        if report.barrelSwitch { buttonMask |= 1 << 1 }
+        if report.eraser { buttonMask |= 1 << 2 }
+        postTabletPointer(report, at: location, pressure: pressure, buttons: buttonMask)
+
         let type: CGEventType
         if isTipDown {
             type = .leftMouseDragged
@@ -237,6 +243,38 @@ public final class TabletEventSynthesizer {
         event.setIntegerValueField(.tabletEventPointY, value: Int64(report.y))
         event.setIntegerValueField(.tabletEventPointZ, value: 0)
         event.setIntegerValueField(.tabletEventPointButtons, value: buttonMask)
+        event.setDoubleValueField(.tabletEventPointPressure, value: pressure)
+        event.setDoubleValueField(.tabletEventTiltX, value: 0)
+        event.setDoubleValueField(.tabletEventTiltY, value: 0)
+        event.setDoubleValueField(.tabletEventRotation, value: 0)
+        event.setDoubleValueField(.tabletEventTangentialPressure, value: 0)
+
+        event.post(tap: .cghidEventTap)
+    }
+
+    /// Posts a standalone tablet-pointer event carrying the same sample.
+    ///
+    /// Mouse events tagged with the tablet subtype move the cursor and deliver clicks,
+    /// and AppKit applications read pressure straight off them. Toolkits that model the
+    /// pen as its own input device — Qt, and therefore anything built on it — instead
+    /// listen for `NSEventTypeTabletPoint`, which only ever arrives from an event of
+    /// this type. Without it they see the cursor move and treat the pen as a mouse.
+    ///
+    /// A real tablet produces both, so both are sent. This event carries no button
+    /// state and does not move the cursor; it is data alongside the mouse event, not a
+    /// duplicate of it.
+    private func postTabletPointer(
+        _ report: PenReport, at location: CGPoint, pressure: Double, buttons: Int64
+    ) {
+        guard let event = CGEvent(source: source) else { return }
+        event.type = .tabletPointer
+        event.location = location
+
+        event.setIntegerValueField(.tabletEventDeviceID, value: deviceID)
+        event.setIntegerValueField(.tabletEventPointX, value: Int64(report.x))
+        event.setIntegerValueField(.tabletEventPointY, value: Int64(report.y))
+        event.setIntegerValueField(.tabletEventPointZ, value: 0)
+        event.setIntegerValueField(.tabletEventPointButtons, value: buttons)
         event.setDoubleValueField(.tabletEventPointPressure, value: pressure)
         event.setDoubleValueField(.tabletEventTiltX, value: 0)
         event.setDoubleValueField(.tabletEventTiltY, value: 0)

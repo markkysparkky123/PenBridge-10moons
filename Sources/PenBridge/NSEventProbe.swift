@@ -62,6 +62,11 @@ private final class ProbeCanvas: NSView {
     private var sawProximity = false
     private var monitorSawProximity = false
     private var proximityCount = 0
+    /// Standalone `NSEventTypeTabletPoint` events, as distinct from mouse events that
+    /// merely carry tablet data in their subtype. Some toolkits — Qt among them — read
+    /// the pen only from the former, so the two counts have to be told apart.
+    private var tabletPointCount = 0
+    private var mouseWithTabletDataCount = 0
     private var maxPressureSeen: Float = 0
     private var monitor: Any?
 
@@ -75,9 +80,15 @@ private final class ProbeCanvas: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard monitor == nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.tabletProximity]) { [weak self] event in
-            self?.monitorSawProximity = true
-            self?.proximityCount += 1
+        monitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.tabletProximity, .tabletPoint]
+        ) { [weak self] event in
+            if event.type == .tabletProximity {
+                self?.monitorSawProximity = true
+                self?.proximityCount += 1
+            } else {
+                self?.tabletPointCount += 1
+            }
             self?.needsDisplay = true
             return event
         }
@@ -105,12 +116,14 @@ private final class ProbeCanvas: NSView {
             \(status)
             proximity — reached the app: \(monitorSawProximity ? "yes (\(proximityCount))" : "NO") \
             · delivered to this view: \(sawProximity ? "yes" : "no")
+            tabletPoint events: \(tabletPointCount)   \
+            mouse events carrying tablet data: \(mouseWithTabletDataCount)
             highest pressure seen: \(String(format: "%.3f", maxPressureSeen))
 
-            Lift the pen right away from the tablet and bring it back to force a
-            proximity event. Applications only learn a pen exists when one arrives.
+            Qt applications read the pen from tabletPoint events. If that count stays
+            at zero while the mouse count climbs, they will see a mouse, not a pen.
             """
-        banner.draw(at: NSPoint(x: 12, y: bounds.height - 84), withAttributes: attributes)
+        banner.draw(at: NSPoint(x: 12, y: bounds.height - 98), withAttributes: attributes)
     }
 
     // MARK: - Tablet events
@@ -143,6 +156,7 @@ private final class ProbeCanvas: NSView {
         if event.subtype == .tabletProximity { sawProximity = true }
 
         let isTablet = event.subtype == .tabletPoint || event.subtype == .tabletProximity
+        if isTablet { mouseWithTabletDataCount += 1 }
         let pressure = isTablet ? event.pressure : 0
         maxPressureSeen = max(maxPressureSeen, pressure)
 

@@ -105,9 +105,17 @@ public final class TabletDeviceMonitor {
     public var onLog: ((String) -> Void)?
 
     /// Take the device exclusively, stopping macOS's own HID driver from also acting
-    /// on it. Needed when the system generates a second cursor from the same pen, and
-    /// worth trying when reports never arrive at all.
-    public var seizeDevice = false
+    /// on it.
+    ///
+    /// Without this the system's generic HID driver keeps generating its own plain
+    /// mouse events from the same pen, interleaved with the tablet events posted here.
+    /// Applications that track a tablet stroke see ordinary mouse movement arrive
+    /// mid-stroke and fall back to treating the pen as a mouse.
+    ///
+    /// Changing this after a device is open takes effect immediately.
+    public var seizeDevice = false {
+        didSet { if seizeDevice != oldValue { reopenDevices() } }
+    }
 
     private let manager: IOHIDManager
     /// Keyed by object identity. `IOHIDDevice` is a CoreFoundation type whose equality
@@ -166,6 +174,23 @@ public final class TabletDeviceMonitor {
         thread?.cancel()
         if let runLoop { CFRunLoopWakeUp(runLoop) }
         IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+    }
+
+    /// Closes and reopens every attached device so a change of open options applies
+    /// without waiting for the tablet to be unplugged.
+    private func reopenDevices() {
+        for (_, tablet) in devices {
+            let options = IOOptionBits(
+                seizeDevice ? kIOHIDOptionsTypeSeizeDevice : kIOHIDOptionsTypeNone
+            )
+            IOHIDDeviceClose(tablet.device, IOOptionBits(kIOHIDOptionsTypeNone))
+            let result = IOHIDDeviceOpen(tablet.device, options)
+            if result == kIOReturnSuccess {
+                onLog?("reopened \(tablet.identifier)\(seizeDevice ? " (seized)" : "")")
+            } else {
+                onLog?("could not reopen \(tablet.identifier): \(Self.describe(result))")
+            }
+        }
     }
 
     // MARK: - Callback plumbing
