@@ -6,16 +6,26 @@ with a bare "entered" and no matching "left", a sequence real hardware never pro
 OpenToonz resets its tablet state on `TabletLeaveProximity`, so it was left holding a
 registration it believed was already active and ignored the pressure it was being sent.
 
-Two places had the same defect:
+It took three attempts to fix, and the first two are worth recording because each looked
+complete and was not.
 
-* **Switching applications.** Re-announcing the pen to the newly frontmost application
-  sent only "entered". Fixed by sending leave then enter.
-* **Restarting the driver.** A previous run that exited without withdrawing the pen left
-  every running application registered to a device with nothing behind it. Restarting the
-  driver did not help; only unplugging the tablet did, because the disconnect is what
-  finally produced the "left proximity" the application was waiting for. Fixed by
-  withdrawing the pen before the first announcement, and by withdrawing it on shutdown
-  whether or not the pen happens to be in range.
+1. **Re-announce when the frontmost application changes.** Fixed switching away and
+   back. Did not fix restarting the driver.
+2. **Withdraw the pen before its first announcement, and on shutdown.** Fixed restarting
+   the driver. Did not fix restarting the application: the one full cycle had already
+   been spent, so an application launched later still received a bare "entered". Pulling
+   the USB cable remained the only reliable cure, because a disconnect is what finally
+   produces the withdrawal an application is waiting for.
+3. **Announce a full leave/enter cycle on every approach of the pen.** This is the fix.
+
+The first two attempts share a mistake: both tried to work out *when* a re-announcement
+was needed. Applications learn about the pen from these events alone and can start at
+any moment — between two strokes, while the pen rests beside the tablet, long after the
+driver did. A withdrawal nobody is registered for is ignored, so announcing in full
+every time costs one extra event and removes the question entirely.
+
+The menu carries a **Re-announce pen to applications** item for anything that still ends
+up out of step.
 
 The investigation below is kept because the measurements are useful in their own right,
 and because it shows how the driver's output was verified independently of any one
