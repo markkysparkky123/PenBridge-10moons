@@ -1,0 +1,44 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:TabletDriver}",
+            "name": "Debug penbridge",
+            "target": "penbridge",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug penbridge"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:TabletDriver}",
+            "name": "Release penbridge",
+            "target": "penbridge",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release penbridge"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:TabletDriver}",
+            "name": "Debug PenBridgeApp",
+            "target": "PenBridgeApp",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug PenBridgeApp"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:TabletDriver}",
+            "name": "Release PenBridgeApp",
+            "target": "PenBridgeApp",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release PenBridgeApp"
+        }
+    ]
+}
