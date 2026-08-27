@@ -13,10 +13,16 @@ USAGE
   penbridge calibrate   Track the true min/max of X, Y and pressure while you move the pen
   penbridge probe       Log the tablet events another driver is posting (needs Accessibility)
 
+OPTIONS
+  --seize   Take the tablet exclusively, so macOS's own HID driver stops handling it.
+            Try this if reports never arrive, or if the cursor appears to be driven twice.
+
 All modes run until interrupted with Ctrl-C.
 """
 
-let command = CommandLine.arguments.dropFirst().first ?? "info"
+let arguments = CommandLine.arguments.dropFirst()
+let command = arguments.first(where: { !$0.hasPrefix("-") }) ?? "info"
+let seize = arguments.contains("--seize")
 guard ["info", "dump", "calibrate", "probe"].contains(command) else {
     print(usage)
     exit(command == "help" || command == "--help" ? 0 : 2)
@@ -93,6 +99,7 @@ func describe(_ device: TabletDevice) -> String {
 // MARK: - Modes
 
 let monitor = TabletDeviceMonitor()
+monitor.seizeDevice = seize
 
 /// Running extremes, used by `calibrate`.
 final class Extremes {
@@ -152,7 +159,23 @@ monitor.onDetach = { device in
     print("── tablet disconnected: \(device.identifier) ──")
 }
 
+/// Counts every report of every kind, so "nothing is happening" can be diagnosed.
+final class Traffic {
+    var total = 0
+    var pen = 0
+    var byReportID: [UInt8: Int] = [:]
+}
+let traffic = Traffic()
+
+monitor.onLog = { message in
+    FileHandle.standardError.write(Data("!! \(message)\n".utf8))
+}
+
 monitor.onReport = { device, reportID, payload in
+    traffic.total += 1
+    traffic.byReportID[reportID, default: 0] += 1
+    if reportID == device.layout.reportID { traffic.pen += 1 }
+
     guard command == "dump" || command == "calibrate" else { return }
 
     // Reports other than the pen's (express keys, consumer control, vendor config)
@@ -198,5 +221,31 @@ if command == "probe" {
 } else {
     monitor.start()
     print("penbridge \(command) — looking for tablets. Ctrl-C to stop.")
+
+    // Silence is ambiguous: it can mean the pen is out of range, the device never
+    // opened, or another driver holds it. A periodic summary tells them apart.
+    var quietTicks = 0
+    var lastTotal = 0
+    Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
+        guard command == "dump" || command == "calibrate" else { return }
+        if traffic.total == lastTotal {
+            quietTicks += 1
+            if traffic.total == 0 && quietTicks <= 4 {
+                print("""
+                    … no reports yet (\(quietTicks * 3)s). If the pen is on the tablet, check:
+                      • the vendor driver is not still running — `pkill -f TabletDriver.app`
+                      • the pen has a working battery, if it takes one
+                      • the pen tip is within a centimetre of the surface
+                    """)
+            } else if traffic.total > 0 && quietTicks == 1 {
+                let breakdown = traffic.byReportID.sorted { $0.key < $1.key }
+                    .map { "id \($0.key): \($0.value)" }.joined(separator: ", ")
+                print("\n… idle. Received so far — \(breakdown); pen reports: \(traffic.pen)")
+            }
+        } else {
+            quietTicks = 0
+            lastTotal = traffic.total
+        }
+    }
     RunLoop.main.run()
 }

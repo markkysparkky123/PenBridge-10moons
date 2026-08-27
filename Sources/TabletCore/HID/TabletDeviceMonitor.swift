@@ -77,31 +77,37 @@ public final class TabletDeviceMonitor {
     /// Called for every input report, with the payload already stripped of its report-ID byte.
     public var onReport: ((TabletDevice, UInt8, [UInt8]) -> Void)?
 
+    /// Diagnostic messages about opening devices — surfaced by the CLI so a silent
+    /// failure to receive reports can be told apart from a pen that is simply not there.
+    public var onLog: ((String) -> Void)?
+
+    /// Take the device exclusively, stopping macOS's own HID driver from also acting
+    /// on it. Needed when the system generates a second cursor from the same pen, and
+    /// worth trying when reports never arrive at all.
+    public var seizeDevice = false
+
     private let manager: IOHIDManager
-    private var devices: [IOHIDDevice: TabletDevice] = [:]
+    /// Keyed by object identity. `IOHIDDevice` is a CoreFoundation type whose equality
+    /// is not identity-based, so using it directly as a dictionary key lets the same
+    /// physical device register twice.
+    private var devices: [ObjectIdentifier: TabletDevice] = [:]
     private var thread: Thread?
     private var runLoop: CFRunLoop?
 
     public init(matching matches: [Match] = [.anyDigitizer]) {
         manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
 
-        // Match on the digitizer usage page so we see pens rather than every HID device,
-        // narrowed further by vendor/product when the caller asked for a specific tablet.
-        let criteria: [[String: Any]] = matches.flatMap { match -> [[String: Any]] in
-            let usages: [(Int, Int)] = [
-                (kHIDPage_Digitizer, kHIDUsage_Dig_Pen),
-                (kHIDPage_Digitizer, kHIDUsage_Dig_Digitizer),
-                (kHIDPage_Digitizer, kHIDUsage_Dig_Stylus),
-            ]
-            return usages.map { page, usage in
-                var dict: [String: Any] = [
-                    kIOHIDDeviceUsagePageKey: page,
-                    kIOHIDDeviceUsageKey: usage,
-                ]
-                if let vendorID = match.vendorID { dict[kIOHIDVendorIDKey] = vendorID }
-                if let productID = match.productID { dict[kIOHIDProductIDKey] = productID }
-                return dict
-            }
+        // One criterion per requested match, not one per usage. IOKit tests a device
+        // against every dictionary and fires the matching callback for each one that
+        // hits, so listing Pen, Digitizer and Stylus separately reports the same
+        // tablet several times. Matching the digitizer usage *page* alone covers all
+        // three, and interfaces that only carry vendor collections are filtered out
+        // later anyway, when the descriptor turns out to have no pen report.
+        let criteria: [[String: Any]] = matches.map { match in
+            var dict: [String: Any] = [kIOHIDDeviceUsagePageKey: kHIDPage_Digitizer]
+            if let vendorID = match.vendorID { dict[kIOHIDVendorIDKey] = vendorID }
+            if let productID = match.productID { dict[kIOHIDProductIDKey] = productID }
+            return dict
         }
         IOHIDManagerSetDeviceMatchingMultiple(manager, criteria as CFArray)
     }
@@ -118,7 +124,10 @@ public final class TabletDeviceMonitor {
             IOHIDManagerScheduleWithRunLoop(
                 self.manager, CFRunLoopGetCurrent(), CFRunLoopMode.defaultMode.rawValue
             )
-            IOHIDManagerOpen(self.manager, IOOptionBits(kIOHIDOptionsTypeNone))
+            let opened = IOHIDManagerOpen(self.manager, IOOptionBits(kIOHIDOptionsTypeNone))
+            if opened != kIOReturnSuccess {
+                self.onLog?("IOHIDManagerOpen failed: \(Self.describe(opened))")
+            }
 
             while !Thread.current.isCancelled {
                 CFRunLoopRunInMode(.defaultMode, 1.0, false)
@@ -139,10 +148,23 @@ public final class TabletDeviceMonitor {
     // MARK: - Callback plumbing
 
     fileprivate func handleAttach(_ device: IOHIDDevice) {
-        guard devices[device] == nil, let tablet = TabletDevice(device: device) else { return }
-        devices[device] = tablet
+        let key = ObjectIdentifier(device)
+        guard devices[key] == nil else { return }
+        guard let tablet = TabletDevice(device: device) else {
+            // Expected for the tablet's other HID interfaces: they carry vendor
+            // collections with no pen report, and there is nothing to drive there.
+            return
+        }
+        devices[key] = tablet
 
-        IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone))
+        let options = IOOptionBits(seizeDevice ? kIOHIDOptionsTypeSeizeDevice : kIOHIDOptionsTypeNone)
+        let result = IOHIDDeviceOpen(device, options)
+        if result != kIOReturnSuccess {
+            onLog?("IOHIDDeviceOpen failed for \(tablet.identifier): \(Self.describe(result))")
+        } else {
+            onLog?("opened \(tablet.identifier)\(seizeDevice ? " (seized)" : "")"
+                + ", input buffer \(tablet.bufferSize) bytes")
+        }
         IOHIDDeviceRegisterInputReportCallback(
             device,
             tablet.buffer,
@@ -154,7 +176,7 @@ public final class TabletDeviceMonitor {
     }
 
     fileprivate func handleDetach(_ device: IOHIDDevice) {
-        guard let tablet = devices.removeValue(forKey: device) else { return }
+        guard let tablet = devices.removeValue(forKey: ObjectIdentifier(device)) else { return }
         IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeNone))
         onDetach?(tablet)
     }
@@ -162,7 +184,7 @@ public final class TabletDeviceMonitor {
     fileprivate func handleReport(
         _ device: IOHIDDevice, reportID: UInt32, buffer: UnsafeMutablePointer<UInt8>, length: Int
     ) {
-        guard let tablet = devices[device], length > 0 else { return }
+        guard let tablet = devices[ObjectIdentifier(device)], length > 0 else { return }
         let raw = [UInt8](UnsafeBufferPointer(start: buffer, count: length))
         let (id, payload) = Self.normalize(raw, reportID: UInt8(truncatingIfNeeded: reportID))
         onReport?(tablet, id, payload)
@@ -176,6 +198,22 @@ public final class TabletDeviceMonitor {
             return (reportID, Array(raw.dropFirst()))
         }
         return (reportID, raw)
+    }
+
+    /// Turns the common IOKit failures into something a user can act on.
+    static func describe(_ result: IOReturn) -> String {
+        switch result {
+        case kIOReturnNotPermitted, kIOReturnNotPrivileged:
+            return "not permitted — Input Monitoring is probably not granted to this program"
+        case kIOReturnExclusiveAccess:
+            return "exclusive access — another driver already owns the device"
+        case kIOReturnNotOpen:
+            return "device not open"
+        case kIOReturnNoDevice:
+            return "no such device"
+        default:
+            return String(format: "IOReturn 0x%08X", UInt32(bitPattern: result))
+        }
     }
 }
 

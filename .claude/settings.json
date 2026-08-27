@@ -3,7 +3,10 @@
     "allow": [
       "Bash(swift build *)",
       "Bash(swift test *)",
-      "Bash(otool -L build/PenBridge.app/Contents/MacOS/PenBridge)"
+      "Bash(otool -L build/PenBridge.app/Contents/MacOS/PenBridge)",
+      "Bash(ioreg -p IOService -n \"[T501] Driver Inside Tablet\" -r -w 0)",
+      "Bash(awk '{print $2, $11, $12}')",
+      "Bash(./Scripts/build-app.sh)"
     ]
   }
 }
