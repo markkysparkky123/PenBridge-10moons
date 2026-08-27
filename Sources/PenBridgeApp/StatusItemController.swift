@@ -117,6 +117,20 @@ final class StatusItemController {
         ))
 
         menu.addItem(.separator())
+        let reannounce = NSMenuItem(
+            title: "Re-announce pen to applications",
+            action: #selector(reannouncePen), keyEquivalent: ""
+        )
+        reannounce.target = self
+        reannounce.toolTip = """
+            Withdraws the pen and presents it again. An application that started at an \
+            awkward moment can end up believing no tablet is attached, and ignore \
+            pressure until it is told otherwise. This is the polite version of \
+            unplugging the tablet.
+            """
+        menu.addItem(reannounce)
+
+        menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit PenBridge", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
@@ -167,6 +181,10 @@ final class StatusItemController {
 
     @objc private func selectPressure(_ sender: NSMenuItem) {
         settings.pressure = [PressureCurve.soft, .linear, .firm][sender.tag]
+    }
+
+    @objc private func reannouncePen() {
+        engine.frontmostApplicationChanged()
     }
 
     @objc private func fixPermissions() {

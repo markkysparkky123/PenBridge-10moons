@@ -104,15 +104,20 @@ public final class TabletEventSynthesizer {
     public func handle(_ report: PenReport, at location: CGPoint, pressure: Double) {
         if report.inRange && !isInProximity {
             currentTool = report.tool
-            // Withdraw the pen before announcing it for the first time, so a stale
-            // registration left behind by a previous run of the driver is cleared.
-            // Without this, restarting the driver is not enough to recover — only
-            // unplugging the tablet is, because that is what finally produces the
-            // "left proximity" the application was waiting for.
-            if !hasAnnounced {
-                postProximity(entering: false, tool: currentTool, at: location)
-                hasAnnounced = true
-            }
+            // Every approach of the pen is announced as a complete leave/enter cycle,
+            // not just the first one.
+            //
+            // An application only ever learns about the pen from these events, and it
+            // can start at any moment: between two strokes, while the pen rests beside
+            // the tablet, long after the driver did. Sending a bare "entered" reaches
+            // only those that happened to be listening for the matching "left" earlier;
+            // anything launched since is left holding a registration it never saw
+            // withdrawn, and treats the arrival as a duplicate.
+            //
+            // A withdrawal nobody is registered for is ignored, so the extra event
+            // costs nothing and removes the need to reason about who started when.
+            postProximity(entering: false, tool: currentTool, at: location)
+            hasAnnounced = true
             postProximity(entering: true, tool: currentTool, at: location)
             isInProximity = true
         }
@@ -148,12 +153,17 @@ public final class TabletEventSynthesizer {
     ///
     /// Callers should invoke this whenever the frontmost application changes.
     public func refreshProximity() {
-        guard isInProximity else { return }
         // Leave first, then enter. Applications track the pen with a state machine, and
         // a bare second "entered" with no matching "left" is a sequence real hardware
         // never produces — some reset their tablet state on the leave and would
         // otherwise be left holding a registration they think is already active.
         postProximity(entering: false, tool: currentTool, at: lastLocation)
+        guard isInProximity else {
+            // The pen is away from the tablet, so there is nothing to present yet. The
+            // withdrawal above still clears any stale registration, and the next
+            // approach of the pen announces it properly.
+            return
+        }
         postProximity(entering: true, tool: currentTool, at: lastLocation)
     }
 
