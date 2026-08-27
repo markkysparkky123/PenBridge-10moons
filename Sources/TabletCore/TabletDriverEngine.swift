@@ -51,6 +51,13 @@ public final class TabletDriverEngine {
         rebuildMapping()
     }
 
+    /// Re-announce the pen to the application that just came to the front, which
+    /// otherwise has no way of knowing a tablet is connected. See
+    /// `TabletEventSynthesizer.refreshProximity()`.
+    public func frontmostApplicationChanged() {
+        synthesizer?.refreshProximity()
+    }
+
     // MARK: - Device lifecycle
 
     private func attach(_ device: TabletDevice) {

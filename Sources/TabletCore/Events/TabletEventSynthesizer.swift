@@ -122,6 +122,20 @@ public final class TabletEventSynthesizer {
         }
     }
 
+    /// Announces the pen again to whichever application is now in front.
+    ///
+    /// Proximity is a one-off event: it is posted when the pen enters the sensing range
+    /// and reaches whatever application is frontmost at that moment. An application
+    /// launched afterwards — or merely switched to — never sees it, and so never learns
+    /// a tablet exists. Every point event that follows carries pressure it has no reason
+    /// to look at, and the pen behaves as a plain mouse.
+    ///
+    /// Callers should invoke this whenever the frontmost application changes.
+    public func refreshProximity() {
+        guard isInProximity else { return }
+        postProximity(entering: true, tool: currentTool, at: lastLocation)
+    }
+
     /// Drops the pen out of proximity — used when the tablet is unplugged or the
     /// driver is switched off, so no application is left thinking a button is held.
     public func reset() {

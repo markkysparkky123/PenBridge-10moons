@@ -60,10 +60,28 @@ private final class ProbeCanvas: NSView {
     private var previous: NSPoint?
     private var status = "Bring the pen close to the tablet…"
     private var sawProximity = false
+    private var monitorSawProximity = false
+    private var proximityCount = 0
     private var maxPressureSeen: Float = 0
+    private var monitor: Any?
 
     override var acceptsFirstResponder: Bool { true }
     override var isOpaque: Bool { true }
+
+    /// Catches tablet events as they enter the application, before any responder
+    /// routing. This separates "the event never arrived" from "the event arrived but
+    /// was not delivered to this view" — two very different faults that look identical
+    /// from inside a responder method.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.tabletProximity]) { [weak self] event in
+            self?.monitorSawProximity = true
+            self?.proximityCount += 1
+            self?.needsDisplay = true
+            return event
+        }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         NSColor.textBackgroundColor.setFill()
@@ -85,10 +103,14 @@ private final class ProbeCanvas: NSView {
         ]
         let banner = """
             \(status)
-            proximity received: \(sawProximity ? "yes" : "NO — applications will treat the pen as a mouse")
+            proximity — reached the app: \(monitorSawProximity ? "yes (\(proximityCount))" : "NO") \
+            · delivered to this view: \(sawProximity ? "yes" : "no")
             highest pressure seen: \(String(format: "%.3f", maxPressureSeen))
+
+            Lift the pen right away from the tablet and bring it back to force a
+            proximity event. Applications only learn a pen exists when one arrives.
             """
-        banner.draw(at: NSPoint(x: 12, y: bounds.height - 56), withAttributes: attributes)
+        banner.draw(at: NSPoint(x: 12, y: bounds.height - 84), withAttributes: attributes)
     }
 
     // MARK: - Tablet events

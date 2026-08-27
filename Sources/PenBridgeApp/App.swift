@@ -24,6 +24,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // geometry the mapper was built against.
         CGDisplayRegisterReconfigurationCallback(displayReconfigured, Unmanaged.passUnretained(self).toOpaque())
 
+        // An application only learns that a tablet exists from a proximity event, and
+        // those are posted when the pen enters the sensing range — long before the
+        // application the user is about to switch to has launched. Re-announce the pen
+        // every time the front application changes, or the first app they open after
+        // picking up the pen will treat it as a mouse.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.engine?.frontmostApplicationChanged()
+        }
+
         if !Permissions.allGranted {
             Permissions.presentMissingAlert()
         }
