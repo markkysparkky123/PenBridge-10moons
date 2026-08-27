@@ -96,7 +96,7 @@ public final class TabletEventSynthesizer {
     public func handle(_ report: PenReport, at location: CGPoint, pressure: Double) {
         if report.inRange && !isInProximity {
             currentTool = report.tool
-            postProximity(entering: true, tool: currentTool)
+            postProximity(entering: true, tool: currentTool, at: location)
             isInProximity = true
         }
 
@@ -104,9 +104,9 @@ public final class TabletEventSynthesizer {
         // proximity and the new one enters, or apps keep drawing with the wrong one.
         if isInProximity && report.tool != currentTool {
             releaseHeldButtons(at: location, pressure: 0)
-            postProximity(entering: false, tool: currentTool)
+            postProximity(entering: false, tool: currentTool, at: location)
             currentTool = report.tool
-            postProximity(entering: true, tool: currentTool)
+            postProximity(entering: true, tool: currentTool, at: location)
         }
 
         if report.inRange {
@@ -116,7 +116,7 @@ public final class TabletEventSynthesizer {
 
         if !report.inRange && isInProximity {
             releaseHeldButtons(at: lastLocation, pressure: 0)
-            postProximity(entering: false, tool: currentTool)
+            postProximity(entering: false, tool: currentTool, at: lastLocation)
             isInProximity = false
         }
     }
@@ -126,15 +126,21 @@ public final class TabletEventSynthesizer {
     public func reset() {
         guard isInProximity else { return }
         releaseHeldButtons(at: lastLocation, pressure: 0)
-        postProximity(entering: false, tool: currentTool)
+        postProximity(entering: false, tool: currentTool, at: lastLocation)
         isInProximity = false
     }
 
     // MARK: - Event construction
 
-    private func postProximity(entering: Bool, tool: PenTool) {
+    private func postProximity(entering: Bool, tool: PenTool, at location: CGPoint) {
         guard let event = CGEvent(source: source) else { return }
         event.type = .tabletProximity
+        // Proximity events are routed by position like any other event. Left at the
+        // default (0, 0) they reach whatever happens to be in the top-left corner
+        // rather than the window being drawn in — and an application that never sees
+        // the pen arrive treats every following point as an ordinary mouse move,
+        // silently discarding pressure. Qt-based apps are particularly strict here.
+        event.location = location
 
         let pointerType: PointerType = tool == .eraser ? .eraser : .pen
         event.setIntegerValueField(.tabletProximityEventVendorID, value: vendorID)
