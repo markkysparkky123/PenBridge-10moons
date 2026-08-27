@@ -96,8 +96,47 @@ than a feature of this one.
 
 A standard boot-keyboard layout: one modifier bitmap byte, one reserved byte, then an
 array of five key usages. The tablet's buttons are wired to fixed shortcuts in firmware
-and arrive as ordinary keystrokes. Remapping them therefore means intercepting this
-report and substituting different events, not reconfiguring the device.
+and arrive as ordinary keystrokes.
+
+Measured on a unit with 12 buttons down the left edge, pressed in order:
+
+| # | Report | Key |
+|---|---|---|
+| 1 | `00 00 08` | `E` |
+| 2 | `00 00 05` | `B` |
+| 3 | `01 00 56` | Ctrl + Keypad − |
+| 4 | `01 00 57` | Ctrl + Keypad + |
+| 5 | `00 00 2F` | `[` |
+| 6 | `00 00 30` | `]` |
+| 7 | `00 00 2B` | Tab |
+| 8 | `00 00 2C` | Space |
+| 9 | `01 00 00` | Ctrl alone |
+| 10 | `04 00 00` | Alt alone |
+| 11 | `08 00 07` | Cmd + `D` |
+
+A photo-editing default set. Each button sends a distinct code, so they can be told
+apart.
+
+## Report ID 4 — the touch strip
+
+Ten touch fields along the top edge, sending consumer-control usages: Mute (`0x00E2`),
+Volume Down (`0x00EA`), Volume Up (`0x00E9`), Media Player (`0x0183`), Play/Pause
+(`0x00CD`), Previous Track (`0x00B6`), Next Track (`0x00B5`), Browser Home (`0x0223`)
+and Calculator (`0x0192`). Nothing to do with drawing.
+
+## Seizing the device does not suppress these
+
+`IOHIDDeviceOpen` with `kIOHIDOptionsTypeSeizeDevice` succeeds — the log reports
+`opened … (seized)` — and macOS **still** acts on the express keys: volume changes, the
+calculator opens, brush shortcuts fire in whatever application is frontmost.
+
+The system's HID event driver (`AppleUserHIDEventDriver`) runs in a DriverKit process
+and keeps generating events regardless of which userspace client holds the device.
+Seizing is therefore not a way to take over a tablet's buttons on a current macOS, which
+matters because it is the obvious approach and it looks like it worked.
+
+Remapping the express keys consequently needs the generated events intercepted and
+swallowed after the fact, not prevented at the source.
 
 ## Reports 1 and 8 — vendor channel
 
