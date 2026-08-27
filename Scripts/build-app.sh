@@ -53,7 +53,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-PenBridge Local Signing}"
-if security find-identity -v -p codesigning 2>/dev/null | grep -qF "$SIGNING_IDENTITY"; then
+# No -v: a self-signed identity is reported untrusted, but signs fine.
+if security find-identity -p codesigning 2>/dev/null | grep -qF "$SIGNING_IDENTITY"; then
     echo "==> Signing as '$SIGNING_IDENTITY'"
     codesign --force --deep --sign "$SIGNING_IDENTITY" --options runtime "$APP"
 else
@@ -86,7 +87,7 @@ otool -L "$APP/Contents/MacOS/PenBridge" | grep -q AppKit \
 codesign --verify --strict "$APP"
 
 echo
-echo "Built $APP  (arm64, ad-hoc signed)"
+echo "Built $APP  (arm64, signed as: $(codesign -dvv "$APP" 2>&1 | grep -E '^Authority=|^Signature=' | head -1 | cut -d= -f2))"
 echo
 echo "Next:"
 echo "  open $APP"
