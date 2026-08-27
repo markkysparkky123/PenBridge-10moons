@@ -11,6 +11,7 @@ USAGE
   penbridge info        Show every detected tablet, its parsed descriptor and pen layout
   penbridge dump        Stream raw HID reports with a decoded breakdown
   penbridge calibrate   Track the true min/max of X, Y and pressure while you move the pen
+  penbridge pressure    Live pressure meter: raw reading, configured band, mapped output
   penbridge probe       Log the tablet events another driver is posting (needs Accessibility)
 
 OPTIONS
@@ -26,7 +27,7 @@ let arguments = CommandLine.arguments.dropFirst()
 let command = arguments.first(where: { !$0.hasPrefix("-") }) ?? "info"
 let seize = arguments.contains("--seize")
 let apply = arguments.contains("--apply")
-guard ["info", "dump", "calibrate", "probe"].contains(command) else {
+guard ["info", "dump", "calibrate", "probe", "pressure"].contains(command) else {
     print(usage)
     exit(command == "help" || command == "--help" ? 0 : 2)
 }
@@ -216,6 +217,19 @@ monitor.onAttach = { device in
             \(Extremes.outputURL.path)
 
             """)
+    case "pressure":
+        print("""
+
+            Press the pen down and lean on it. Watch how the bar responds:
+
+              • a bar that climbs smoothly with force means the sensor is fine
+              • a bar that jumps most of the way the instant the tip touches means
+                the hardware barely distinguishes force, which no driver can fix
+              • "SATURATED" means the mapped output has stopped moving because the
+                configured ceiling is lower than what you actually press — recalibrate
+                with `calibrate --apply`, pressing as hard as you ever will
+
+            """)
     default:
         break
     }
@@ -242,7 +256,7 @@ monitor.onReport = { device, reportID, payload in
     traffic.byReportID[reportID, default: 0] += 1
     if reportID == device.layout.reportID { traffic.pen += 1 }
 
-    guard command == "dump" || command == "calibrate" else { return }
+    guard ["dump", "calibrate", "pressure"].contains(command) else { return }
 
     // Reports other than the pen's (express keys, consumer control, vendor config)
     // are still worth showing in dump mode — they are undocumented territory.
@@ -277,6 +291,10 @@ monitor.onReport = { device, reportID, payload in
         extremes.record(report)
         extremes.layout = device.layout
         print("\r\(extremes.render(against: device.layout))", terminator: "")
+        fflush(stdout)
+    case "pressure":
+        let meter = PressureMeter(layout: device.layout, curve: Settings.load().pressure)
+        print("\r\u{1B}[K\(meter.render(report))", terminator: "")
         fflush(stdout)
     default:
         break
@@ -337,6 +355,19 @@ func applyCalibration() {
 
             Restart PenBridge for it to take effect.
             """)
+
+        // Setting the ceiling from a press that was not actually maximal is a trap:
+        // every heavier press then maps to the same full pressure, and strokes read as
+        // jumping straight to maximum weight.
+        if settings.pressure.upperThreshold < 0.9 {
+            print("""
+
+                Note: \(extremes.maxPressure) of \(layout.pressureRange.upperBound) was
+                the hardest press recorded. If you normally press harder than that while
+                drawing, everything above it will now saturate at full pressure. Run
+                `calibrate --apply` again and press as hard as you ever will.
+                """)
+        }
     } catch {
         print("\n\nCould not write settings: \(error.localizedDescription)")
     }
