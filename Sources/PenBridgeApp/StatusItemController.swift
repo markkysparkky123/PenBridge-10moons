@@ -73,6 +73,16 @@ final class StatusItemController {
         enabled.state = settings.isEnabled ? .on : .off
         menu.addItem(enabled)
 
+        let login = NSMenuItem(
+            title: "Start at login", action: #selector(toggleLoginItem), keyEquivalent: ""
+        )
+        login.target = self
+        login.state = LoginItem.isEnabled ? .on : .off
+        if LoginItem.isBlockedByUser {
+            login.title = "Start at login — needs approval"
+        }
+        menu.addItem(login)
+
         let proportions = NSMenuItem(
             title: "Preserve proportions", action: #selector(toggleProportions), keyEquivalent: ""
         )
@@ -161,6 +171,15 @@ final class StatusItemController {
 
     @objc private func toggleEnabled() {
         settings.isEnabled.toggle()
+    }
+
+    @objc private func toggleLoginItem() {
+        let wantsEnabled = !LoginItem.isEnabled
+        let error = LoginItem.setEnabled(wantsEnabled)
+        if error != nil || LoginItem.isBlockedByUser {
+            LoginItem.presentFailure(error, wasEnabling: wantsEnabled)
+        }
+        rebuildMenu()
     }
 
     @objc private func toggleProportions() {

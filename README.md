@@ -37,17 +37,20 @@ Tested on macOS 26:
 | HuePaint | AppKit | works |
 | MediBang Paint Pro | Qt 5.5 | works |
 | OpenToonz 1.7.1 | Qt 5.15 | works |
-| FireAlpaca 2 | Qt 5.4 | no response |
+| FireAlpaca 2 | Qt 5.4 | works |
 
-Applications track the pen through proximity events, and they are strict about the
-sequence: an "entered" must be matched by a "left". Getting that wrong is invisible in
-a log of individual events — each one carries correct pressure — and shows up only as
-an application that ignores the pen entirely. See [Docs/OPENTOONZ.md](Docs/OPENTOONZ.md).
+Two of these looked at first like the driver failing, and neither was the same problem.
 
-The usual culprit is a brush whose size is configured as a **range**, with the minimum
-and maximum set to the same value. Pressure then varies a quantity that cannot change,
-and the setting that enables it looks correctly switched on. OpenToonz's Brush tool
-options are like this: `Size` has separate minimum and maximum handles.
+**FireAlpaca** was a brush setting inside the application. Its Qt log showed pressure
+arriving at 0.82 across 2315 strokes the whole time. Before concluding the driver is at
+fault, check that the brush is actually configured to vary with pressure — the usual
+trap is a size set as a **range** with both ends on the same value, which cannot change
+no matter what pressure arrives.
+
+**OpenToonz** was the driver, but not in a way any single event could show. Applications
+track the pen through proximity events and are strict about the sequence: an "entered"
+must be matched by a "left". Every individual event carried correct pressure; the order
+they arrived in was wrong. See [Docs/OPENTOONZ.md](Docs/OPENTOONZ.md).
 
 If you find a real incompatibility, `penbridge-cli nsprobe` produces the evidence worth
 attaching to a bug report: it shows the event counts and pressure values an application
