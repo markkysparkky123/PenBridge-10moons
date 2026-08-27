@@ -133,6 +133,11 @@ public final class TabletEventSynthesizer {
     /// Callers should invoke this whenever the frontmost application changes.
     public func refreshProximity() {
         guard isInProximity else { return }
+        // Leave first, then enter. Applications track the pen with a state machine, and
+        // a bare second "entered" with no matching "left" is a sequence real hardware
+        // never produces — some reset their tablet state on the leave and would
+        // otherwise be left holding a registration they think is already active.
+        postProximity(entering: false, tool: currentTool, at: lastLocation)
         postProximity(entering: true, tool: currentTool, at: lastLocation)
     }
 
