@@ -3,8 +3,8 @@
 An open-source macOS driver for cheap USB graphics tablets, built natively for Apple
 Silicon.
 
-It exists because the tablet it was written for — a `SZ PING-IT [T501]`, sold under
-various names — ships with an Intel-only driver that its vendor stopped supporting at
+It exists because the tablet it was written for — a **10moons (天敏) 1060Plus**, USB
+`08F2:6811` — ships with an Intel-only driver that its vendor stopped supporting at
 macOS 10.13. That driver runs on Apple Silicon today only through Rosetta 2, which is
 being wound down. PenBridge does the same job as a native `arm64` build, from source
 you can read.

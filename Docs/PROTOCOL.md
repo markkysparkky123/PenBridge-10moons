@@ -1,4 +1,8 @@
-# PING-IT T501 tablet protocol
+# 10moons 1060Plus tablet protocol
+
+Sold as a **10moons (天敏) 1060Plus**, made by 惠州市新启点软件有限公司
+(Huizhou Xinqidian Software). Retail brand and OEM are different companies, as usual at
+this price.
 
 Everything here was read off the device itself — its USB and HID descriptors, as
 published to the operating system — and confirmed against live reports. No vendor
@@ -11,12 +15,20 @@ is plugged in. Pull requests documenting other models are welcome.
 
 | | |
 |---|---|
-| Vendor ID | `0x08F2` (`SZ PING-IT INC.`) |
+| Vendor ID | `0x08F2` |
 | Product ID | `0x6811` |
-| Product string | `[T501] Driver Inside Tablet` |
+| Board revision | VER 2.0, 5 V DC below 0.5 A |
+| Product string | `[T501] Driver Inside Tablet` — see below |
 | Serial string | `Internal CDROM ` |
 | Device release | `bcdDevice` 6404 |
 | USB version | 1.10, Full Speed (12 Mbit/s) |
+
+**Identify these tablets by vendor and product ID, not by their strings.** The
+manufacturer string this unit reports has been observed to change between sessions,
+naming different companies for the same physical device. Whether that comes from the
+firmware or from how macOS caches descriptors is unclear, but either way the strings are
+not something to match on. PenBridge does not: it matches any device claiming the HID
+digitizer usage and reads the layout from the descriptor.
 
 Composite device with three interfaces:
 
