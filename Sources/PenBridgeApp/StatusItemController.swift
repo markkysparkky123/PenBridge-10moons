@@ -10,6 +10,10 @@ final class StatusItemController {
     private let statusItem: NSStatusItem
     private let engine: TabletDriverEngine
     private let suppressor: ExpressKeySuppressor
+    /// What the suppressor has discarded, shown in the menu so the feature is visibly
+    /// doing something rather than indistinguishable from a button that does nothing.
+    private var suppressedCount = 0
+    private var lastSuppressed: String?
     private var settings: Settings {
         didSet {
             engine.settings = settings
@@ -31,6 +35,11 @@ final class StatusItemController {
 
         engine.onStateChange = { [weak self] state in
             Task { @MainActor in self?.render(state) }
+        }
+        suppressor.onSuppressed = { [weak self] key in
+            guard let self else { return }
+            self.suppressedCount += 1
+            self.lastSuppressed = key
         }
         rebuildMenu()
     }
@@ -128,6 +137,15 @@ final class StatusItemController {
             until you ask for it.
             """
         menu.addItem(suppress)
+
+        if settings.suppressExpressKeys {
+            let detail = suppressedCount == 0
+                ? "    nothing discarded yet — press a tablet button"
+                : "    discarded \(suppressedCount), last: \(lastSuppressed ?? "—")"
+            let item = NSMenuItem(title: detail, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
 
         menu.addItem(.separator())
         menu.addItem(submenu(
