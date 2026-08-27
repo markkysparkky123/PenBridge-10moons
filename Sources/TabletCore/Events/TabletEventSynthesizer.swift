@@ -73,6 +73,13 @@ public final class TabletEventSynthesizer {
     private let deviceID: Int64
 
     private var isInProximity = false
+    /// Whether this synthesizer has announced the pen at all yet.
+    ///
+    /// A previous run of the driver may have exited without withdrawing the pen —
+    /// killed, crashed, or simply quit while the pen was away from the tablet. Any
+    /// application still running holds a registration for a device that no longer has
+    /// anything behind it, and treats the fresh "entered" as a duplicate.
+    private var hasAnnounced = false
     private var currentTool: PenTool = .pen
     private var isTipDown = false
     private var isBarrelDown = false
@@ -97,6 +104,15 @@ public final class TabletEventSynthesizer {
     public func handle(_ report: PenReport, at location: CGPoint, pressure: Double) {
         if report.inRange && !isInProximity {
             currentTool = report.tool
+            // Withdraw the pen before announcing it for the first time, so a stale
+            // registration left behind by a previous run of the driver is cleared.
+            // Without this, restarting the driver is not enough to recover — only
+            // unplugging the tablet is, because that is what finally produces the
+            // "left proximity" the application was waiting for.
+            if !hasAnnounced {
+                postProximity(entering: false, tool: currentTool, at: location)
+                hasAnnounced = true
+            }
             postProximity(entering: true, tool: currentTool, at: location)
             isInProximity = true
         }
@@ -144,7 +160,11 @@ public final class TabletEventSynthesizer {
     /// Drops the pen out of proximity — used when the tablet is unplugged or the
     /// driver is switched off, so no application is left thinking a button is held.
     public func reset() {
-        guard isInProximity else { return }
+        // The withdrawal is sent whenever the pen was ever announced, not only while it
+        // happens to be in range. Quitting with the pen resting beside the tablet would
+        // otherwise leave every running application registered to a device that is
+        // about to disappear.
+        guard hasAnnounced else { return }
         releaseHeldButtons(at: lastLocation, pressure: 0)
         postProximity(entering: false, tool: currentTool, at: lastLocation)
         isInProximity = false

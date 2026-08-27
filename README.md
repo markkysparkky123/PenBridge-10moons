@@ -9,9 +9,9 @@ macOS 10.13. That driver runs on Apple Silicon today only through Rosetta 2, whi
 being wound down. PenBridge does the same job as a native `arm64` build, from source
 you can read.
 
-**Status: early.** The pen protocol is decoded and covered by tests; cursor control,
-pressure and the menu-bar UI are implemented. It has not yet been through a full
-hardware verification pass. Expect rough edges.
+**Status: working, young.** Verified on real hardware: the cursor tracks, clicks land,
+and pressure reaches drawing applications. Area mapping is not yet adjustable beyond
+proportions and rotation, and the tablet's own buttons cannot be remapped.
 
 ## What works
 
@@ -36,11 +36,13 @@ Tested on macOS 26:
 | `penbridge-cli nsprobe` | AppKit | works |
 | HuePaint | AppKit | works |
 | MediBang Paint Pro | Qt 5.5 | works |
+| OpenToonz 1.7.1 | Qt 5.15 | works |
 | FireAlpaca 2 | Qt 5.4 | no response |
-| OpenToonz 1.7.1 | Qt 5.15 | no response |
 
-Both Qt and AppKit applications read the pen correctly, so an application that ignores
-pressure is not evidence that the driver is failing — check its own settings first.
+Applications track the pen through proximity events, and they are strict about the
+sequence: an "entered" must be matched by a "left". Getting that wrong is invisible in
+a log of individual events — each one carries correct pressure — and shows up only as
+an application that ignores the pen entirely. See [Docs/OPENTOONZ.md](Docs/OPENTOONZ.md).
 
 The usual culprit is a brush whose size is configured as a **range**, with the minimum
 and maximum set to the same value. Pressure then varies a quantity that cannot change,
@@ -136,12 +138,14 @@ A command-line tool ships inside the bundle. It is the fastest way to find out w
 tablet is actually doing.
 
 ```sh
-APP=build/PenBridge.app/Contents/MacOS/penbridge-cli
+APP=~/Applications/PenBridge.app/Contents/MacOS/penbridge-cli
 
-$APP info        # detected tablets, parsed descriptor, pen layout
-$APP dump        # raw HID reports with a decoded breakdown
-$APP calibrate   # track the true min/max of X, Y and pressure as you move the pen
-$APP probe       # log the tablet events any driver is posting
+$APP info               # detected tablets, parsed descriptor, pen layout
+$APP dump               # raw HID reports with a decoded breakdown
+$APP pressure           # live pressure meter: raw, configured band, mapped output
+$APP calibrate --apply  # measure the tablet's true limits and write them to the config
+$APP probe              # log the tablet events any driver is posting
+$APP nsprobe            # draw in a window; shows what an application actually receives
 ```
 
 `calibrate` matters more than it sounds. Tablets routinely disagree with the range they
@@ -152,6 +156,10 @@ settle.
 `probe` is for comparing drivers. Run it while another driver is active to see exactly
 which event fields reach applications — useful when one drawing app sees pressure and
 another does not.
+
+`nsprobe` opens a window and draws strokes weighted by the pressure it receives. If the
+stroke varies there but not in the application you care about, the driver has done its
+part; if it does not vary there either, the driver has not.
 
 ## Other tablets
 

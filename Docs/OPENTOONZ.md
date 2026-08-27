@@ -1,8 +1,30 @@
-# OpenToonz ignores pen pressure
+# OpenToonz and pen pressure — resolved
 
-OpenToonz 1.7.1 on macOS 26 does not vary stroke weight with pen pressure, while other
-applications on the same machine and the same driver do. The evidence below places the
-fault in OpenToonz rather than in the driver or in Qt.
+**Resolved.** OpenToonz 1.7.1 responds to pressure correctly once the driver sends a
+complete proximity cycle. The cause was on this side: proximity was being re-announced
+with a bare "entered" and no matching "left", a sequence real hardware never produces.
+OpenToonz resets its tablet state on `TabletLeaveProximity`, so it was left holding a
+registration it believed was already active and ignored the pressure it was being sent.
+
+Two places had the same defect:
+
+* **Switching applications.** Re-announcing the pen to the newly frontmost application
+  sent only "entered". Fixed by sending leave then enter.
+* **Restarting the driver.** A previous run that exited without withdrawing the pen left
+  every running application registered to a device with nothing behind it. Restarting the
+  driver did not help; only unplugging the tablet did, because the disconnect is what
+  finally produced the "left proximity" the application was waiting for. Fixed by
+  withdrawing the pen before the first announcement, and by withdrawing it on shutdown
+  whether or not the pen happens to be in range.
+
+The investigation below is kept because the measurements are useful in their own right,
+and because it shows how the driver's output was verified independently of any one
+application.
+
+## The original symptom
+
+OpenToonz did not vary stroke weight with pen pressure, while other applications on the
+same machine and the same driver did.
 
 Recorded with PenBridge driving a `SZ PING-IT [T501]`, brush tool with `Pressure`
 enabled and `Size` set to a genuine minimum/maximum range.
@@ -51,8 +73,12 @@ Over one ten-second drawing session, 2230 tablet events:
 | unique ID | 150104081 (`0x08F26811`), matching the tablet's vendor and product |
 
 Qt's platform plugin therefore constructs `QTabletEvent`s carrying the correct pressure
-and delivers them to the application. Whatever discards the pressure is above that
-layer, inside OpenToonz.
+and delivers them to the application.
+
+At the time, that was read as putting the fault inside OpenToonz. It was the right
+measurement and the wrong conclusion: every individual event was correct, but the
+*sequence* they arrived in was not, and a log of individual events cannot show that.
+The malformed proximity cycle above was the actual cause.
 
 ## Reproducing the measurement
 
