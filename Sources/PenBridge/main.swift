@@ -93,6 +93,14 @@ func describe(_ device: TabletDevice) -> String {
     if !otherReports.isEmpty {
         lines.append("Other input reports  \(otherReports.map(String.init).joined(separator: ", "))")
     }
+
+    // The vendor configuration channel. Reading it is harmless and shows what mode the
+    // tablet thinks it is in — useful when the pen stays silent.
+    for report in device.featureReports {
+        let value = device.readFeatureReport(id: report.id, size: report.size)
+        let rendered = value.map(hex) ?? "unreadable"
+        lines.append("Feature \(report.id)   \(report.size) bytes: \(rendered)")
+    }
     return lines.joined(separator: "\n")
 }
 

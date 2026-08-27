@@ -48,6 +48,29 @@ public final class TabletDevice {
     public var identifier: String {
         String(format: "%@ (%04X:%04X)", name, vendorID, productID)
     }
+
+    /// Report IDs the descriptor declares as Feature reports, with their payload sizes.
+    public var featureReports: [(id: UInt8, size: Int)] {
+        var sizes: [UInt8: Int] = [:]
+        for field in fields where field.kind == .feature {
+            sizes[field.reportID] = max(sizes[field.reportID] ?? 0, field.bitOffset + field.bitSize)
+        }
+        return sizes.sorted { $0.key < $1.key }.map { ($0.key, ($0.value + 7) / 8) }
+    }
+
+    /// Reads one Feature report from the device.
+    ///
+    /// These are the vendor's configuration channel. Reading is safe and tells us what
+    /// state the tablet believes it is in; nothing here ever writes to the device.
+    public func readFeatureReport(id: UInt8, size: Int) -> [UInt8]? {
+        var buffer = [UInt8](repeating: 0, count: size + 1)
+        var length = CFIndex(buffer.count)
+        let result = buffer.withUnsafeMutableBufferPointer { pointer in
+            IOHIDDeviceGetReport(device, kIOHIDReportTypeFeature, CFIndex(id), pointer.baseAddress!, &length)
+        }
+        guard result == kIOReturnSuccess, length > 0 else { return nil }
+        return Array(buffer.prefix(Int(length)))
+    }
 }
 
 /// Discovers graphics tablets, opens them, and streams their raw input reports.
@@ -172,11 +195,20 @@ public final class TabletDeviceMonitor {
             reportReceived,
             Unmanaged.passUnretained(self).toOpaque()
         )
+        // Devices found through a scheduled manager are usually scheduled with it, but
+        // input *report* callbacks only fire on a run loop the device itself is attached
+        // to. Doing it explicitly costs nothing and removes a silent failure mode.
+        if let runLoop {
+            IOHIDDeviceScheduleWithRunLoop(device, runLoop, CFRunLoopMode.defaultMode.rawValue)
+        }
         onAttach?(tablet)
     }
 
     fileprivate func handleDetach(_ device: IOHIDDevice) {
         guard let tablet = devices.removeValue(forKey: ObjectIdentifier(device)) else { return }
+        if let runLoop {
+            IOHIDDeviceUnscheduleFromRunLoop(device, runLoop, CFRunLoopMode.defaultMode.rawValue)
+        }
         IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeNone))
         onDetach?(tablet)
     }
