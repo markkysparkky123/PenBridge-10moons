@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import IOKit.hid
 import TabletCore
@@ -12,14 +13,15 @@ USAGE
   penbridge dump        Stream raw HID reports with a decoded breakdown
   penbridge calibrate   Track the true min/max of X, Y and pressure while you move the pen
   penbridge pressure    Live pressure meter: raw reading, configured band, mapped output
+  penbridge area        Choose the active area by tapping two opposite corners
   penbridge probe       Log the tablet events another driver is posting (needs Accessibility)
   penbridge nsprobe     Open a scratch window and draw in it — shows what an app receives
 
 OPTIONS
   --seize   Take the tablet exclusively, so macOS's own HID driver stops handling it.
             Try this if reports never arrive, or if the cursor appears to be driven twice.
-  --apply   calibrate only: write the measurement into the driver's settings on exit,
-            so the mapper uses the tablet's real limits instead of its declared ones.
+  --apply   calibrate and area: write the measurement into the driver's settings,
+            so the mapper uses your tablet and your choice rather than its defaults.
 
 All modes run until interrupted with Ctrl-C.
 """
@@ -28,7 +30,7 @@ let arguments = CommandLine.arguments.dropFirst()
 let command = arguments.first(where: { !$0.hasPrefix("-") }) ?? "info"
 let seize = arguments.contains("--seize")
 let apply = arguments.contains("--apply")
-guard ["info", "dump", "calibrate", "probe", "pressure", "nsprobe"].contains(command) else {
+guard ["info", "dump", "calibrate", "probe", "pressure", "nsprobe", "area"].contains(command) else {
     print(usage)
     exit(command == "help" || command == "--help" ? 0 : 2)
 }
@@ -231,6 +233,16 @@ monitor.onAttach = { device in
                 with `calibrate --apply`, pressing as hard as you ever will
 
             """)
+    case "area":
+        print("""
+
+            The active area is the part of the tablet that maps to the whole screen.
+
+            Tap two opposite corners of the area you want — top-left, then
+            bottom-right. Tap where you want the edge of the screen to be, not
+            necessarily at the edge of the tablet.
+
+            """)
     default:
         break
     }
@@ -238,6 +250,46 @@ monitor.onAttach = { device in
 
 monitor.onDetach = { device in
     print("── tablet disconnected: \(device.identifier) ──")
+}
+
+let areaSetup = AreaSetup()
+
+/// Writes the selected active area into the driver's settings.
+///
+/// Refuses a selection too small to be a deliberate choice: a stray double tap in one
+/// spot would otherwise map the entire screen onto a few millimetres of tablet, leaving
+/// a cursor that cannot be steered well enough to open the menu and undo it.
+func applyArea(layout: PenReportLayout) {
+    let area = areaSetup.area
+    guard area.width > 0.05, area.height > 0.05 else {
+        print("""
+
+            That selection is only \(Int(area.width * 100))% by \(Int(area.height * 100))% \
+            of the tablet — too small to be intended, so nothing was written.
+            Tap two genuinely opposite corners.
+            """)
+        return
+    }
+    guard apply else {
+        print("""
+
+            Nothing written. Run `penbridge-cli area --apply` to save this.
+            """)
+        return
+    }
+
+    var settings = Settings.load()
+    settings.area = NormalizedRect(area)
+    do {
+        try settings.save()
+        print("""
+
+            Written to \(Settings.storeURL.path)
+            Restart PenBridge for it to take effect.
+            """)
+    } catch {
+        print("\nCould not write settings: \(error.localizedDescription)")
+    }
 }
 
 /// Counts every report of every kind, so "nothing is happening" can be diagnosed.
@@ -257,7 +309,7 @@ monitor.onReport = { device, reportID, payload in
     traffic.byReportID[reportID, default: 0] += 1
     if reportID == device.layout.reportID { traffic.pen += 1 }
 
-    guard ["dump", "calibrate", "pressure"].contains(command) else { return }
+    guard ["dump", "calibrate", "pressure", "area"].contains(command) else { return }
 
     // Reports other than the pen's (express keys, consumer control, vendor config)
     // are still worth showing in dump mode — they are undocumented territory.
@@ -296,6 +348,22 @@ monitor.onReport = { device, reportID, payload in
     case "pressure":
         let meter = PressureMeter(layout: device.layout, curve: Settings.load().pressure)
         print("\r\u{1B}[K\(meter.render(report))", terminator: "")
+        fflush(stdout)
+    case "area":
+        guard !areaSetup.isFinished else { return }
+        let settings = Settings.load()
+        areaSetup.handle(report, calibration: settings.calibration, layout: device.layout)
+        if areaSetup.isFinished {
+            let screen = CGDisplayBounds(settings.displayID ?? CGMainDisplayID())
+            print("\r\u{1B}[K")
+            print(areaSetup.summary(
+                layout: device.layout, screen: screen,
+                preserveAspect: settings.preserveAspectRatio
+            ))
+            applyArea(layout: device.layout)
+            exit(0)
+        }
+        print("\r\u{1B}[K\(areaSetup.status)", terminator: "")
         fflush(stdout)
     default:
         break

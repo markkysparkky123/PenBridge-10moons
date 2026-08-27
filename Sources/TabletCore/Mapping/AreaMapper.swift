@@ -54,16 +54,25 @@ public struct AreaMapper: Sendable {
         )
     }
 
-    /// The largest centred sub-rectangle of the tablet whose physical shape matches the screen.
+    /// The largest centred sub-rectangle of `within` whose physical shape matches the screen.
+    ///
+    /// `within` is the area the user chose to use, in normalized tablet coordinates;
+    /// the result is trimmed inside it rather than replacing it. Composing the two this
+    /// way means "use this corner of the tablet" and "keep circles round" are
+    /// independent choices instead of fighting each other.
     public static func proportionalArea(
         layout: PenReportLayout,
         screen: CGRect,
-        rotation: TabletRotation = .none
+        rotation: TabletRotation = .none,
+        within base: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)
     ) -> CGRect {
         guard
-            let widthMM = layout.widthMM, let heightMM = layout.heightMM,
+            let fullWidthMM = layout.widthMM, let fullHeightMM = layout.heightMM,
+            base.width > 0, base.height > 0,
+            case let widthMM = fullWidthMM * base.width,
+            case let heightMM = fullHeightMM * base.height,
             widthMM > 0, heightMM > 0, screen.width > 0, screen.height > 0
-        else { return CGRect(x: 0, y: 0, width: 1, height: 1) }
+        else { return base }
 
         // Under 90/270 rotation the tablet's height feeds the screen's width.
         let tabletWidth = rotation.swapsAxes ? heightMM : widthMM
@@ -84,12 +93,13 @@ public struct AreaMapper: Sendable {
 
         // Those fractions are expressed in the rotated frame; undo the swap so the
         // result is a rectangle in the tablet's own coordinate space.
-        let normalizedWidth = rotation.swapsAxes ? fractionY : fractionX
-        let normalizedHeight = rotation.swapsAxes ? fractionX : fractionY
+        let normalizedWidth = base.width * (rotation.swapsAxes ? fractionY : fractionX)
+        let normalizedHeight = base.height * (rotation.swapsAxes ? fractionX : fractionY)
 
+        // Centre the trimmed rectangle inside the chosen area, not inside the tablet.
         return CGRect(
-            x: (1 - normalizedWidth) / 2,
-            y: (1 - normalizedHeight) / 2,
+            x: base.minX + (base.width - normalizedWidth) / 2,
+            y: base.minY + (base.height - normalizedHeight) / 2,
             width: normalizedWidth,
             height: normalizedHeight
         )

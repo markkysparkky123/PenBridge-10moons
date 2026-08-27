@@ -97,19 +97,14 @@ public final class TabletDriverEngine {
         // A display that has gone away reports an empty rect; fall back to the main one.
         let screen = bounds.isEmpty ? CGDisplayBounds(CGMainDisplayID()) : bounds
 
-        let area: CGRect
-        if settings.preserveAspectRatio {
-            let proportional = AreaMapper.proportionalArea(
-                layout: device.layout, screen: screen, rotation: settings.rotation
+        // The chosen area says which part of the tablet to use; preserving proportions
+        // then trims inside it. Two independent choices, applied in that order.
+        let area = settings.preserveAspectRatio
+            ? AreaMapper.proportionalArea(
+                layout: device.layout, screen: screen,
+                rotation: settings.rotation, within: settings.area.cgRect
             )
-            // Intersect the user's chosen area with the proportional one so both
-            // constraints hold rather than one silently overriding the other.
-            area = settings.area.cgRect.intersection(proportional).isNull
-                ? proportional
-                : settings.area.cgRect.intersection(proportional)
-        } else {
-            area = settings.area.cgRect
-        }
+            : settings.area.cgRect
 
         mapper = AreaMapper(area: area, rotation: settings.rotation, screen: screen)
         synthesizer?.configuration.barrelSwitchRightClicks = settings.barrelSwitchRightClicks

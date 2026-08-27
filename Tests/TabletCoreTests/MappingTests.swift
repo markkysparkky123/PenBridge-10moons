@@ -111,6 +111,60 @@ struct AreaMapperTests {
         #expect(abs(inside.x - 960) < 0.001)
     }
 
+    @Test("Proportions are preserved inside a chosen area, not instead of it")
+    func proportionalWithinChosenArea() {
+        let layout = makeLayout()
+        // The lower half of the tablet, as someone might pick to keep the pen near
+        // their hand.
+        let chosen = CGRect(x: 0, y: 0.5, width: 1, height: 0.5)
+        let trimmed = AreaMapper.proportionalArea(layout: layout, screen: fullHD, within: chosen)
+
+        // The result stays inside what was chosen.
+        #expect(trimmed.minX >= chosen.minX - 0.0001)
+        #expect(trimmed.maxX <= chosen.maxX + 0.0001)
+        #expect(trimmed.minY >= chosen.minY - 0.0001)
+        #expect(trimmed.maxY <= chosen.maxY + 0.0001)
+
+        // 203.2 x 67.8 mm is wider than 16:9, so width is the axis trimmed here —
+        // the opposite of what happens with the full tablet.
+        #expect(trimmed.height == chosen.height)
+        #expect(trimmed.width < chosen.width)
+
+        // And it is centred within the chosen area.
+        #expect(abs(trimmed.midX - chosen.midX) < 0.0001)
+        #expect(abs(trimmed.midY - chosen.midY) < 0.0001)
+    }
+
+    @Test("A chosen area still fills the screen edge to edge")
+    func chosenAreaReachesEdges() {
+        let layout = makeLayout()
+        let chosen = CGRect(x: 0.1, y: 0.2, width: 0.6, height: 0.5)
+        let mapper = AreaMapper(area: chosen, screen: fullHD)
+
+        // The corners of the chosen area are the corners of the screen.
+        let topLeft = mapper.map(
+            x: Int(chosen.minX * 4096), y: Int(chosen.minY * 4096), layout: layout
+        )
+        #expect(abs(topLeft.x) < 1)
+        #expect(abs(topLeft.y) < 1)
+
+        let bottomRight = mapper.map(
+            x: Int(chosen.maxX * 4096), y: Int(chosen.maxY * 4096), layout: layout
+        )
+        #expect(abs(bottomRight.x - 1920) < 1)
+        #expect(abs(bottomRight.y - 1080) < 1)
+    }
+
+    @Test("Trimming the full tablet is unchanged by the new parameter")
+    func defaultUnchanged() {
+        let layout = makeLayout()
+        let explicit = AreaMapper.proportionalArea(
+            layout: layout, screen: fullHD, within: CGRect(x: 0, y: 0, width: 1, height: 1)
+        )
+        let implicit = AreaMapper.proportionalArea(layout: layout, screen: fullHD)
+        #expect(explicit == implicit)
+    }
+
     @Test("A sub-area covers the whole screen")
     func subArea() {
         let layout = makeLayout()
