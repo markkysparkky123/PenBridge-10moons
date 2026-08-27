@@ -49,15 +49,38 @@ open build/PenBridge.app
 Or open `Package.swift` in Xcode and run the `PenBridgeApp` scheme.
 
 The build is not code-signed with an Apple Developer ID, because this project does not
-have one. It is ad-hoc signed, which is enough for a build you made yourself on the
-machine you made it on. If you move the `.app` to another Mac, Gatekeeper will refuse it
-until you right-click the app and choose **Open**, or run:
+have one. If you move the `.app` to another Mac, Gatekeeper will refuse it until you
+right-click the app and choose **Open**, or run:
 
 ```sh
 xattr -dr com.apple.quarantine /path/to/PenBridge.app
 ```
 
 Building it yourself is the recommended route, and the reason the sources are here.
+
+### If you plan to rebuild
+
+Run this once, before your first build:
+
+```sh
+./Scripts/make-signing-cert.sh
+```
+
+Without it the app is ad-hoc signed, which means macOS identifies it by the hash of its
+contents:
+
+```
+designated => cdhash H"776db06f..."
+```
+
+That hash changes on every build, and privacy grants are attached to it — so macOS asks
+for Input Monitoring and Accessibility again after **every single rebuild**, and the
+permissions you already granted appear to be ignored. The script creates a local
+self-signed certificate so the app is identified by bundle ID and certificate instead,
+which survives rebuilds.
+
+It touches only your own keychain, changes nothing for anyone else, and can be undone by
+deleting the certificate in Keychain Access.
 
 ## Permissions
 

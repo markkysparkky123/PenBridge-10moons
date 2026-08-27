@@ -52,11 +52,24 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-echo "==> Signing (ad-hoc)"
-# An ad-hoc signature is enough for privacy grants to stick to this bundle on the
-# machine that built it. It is not a Developer ID signature, so a copy handed to
-# someone else still trips Gatekeeper — see README.
-codesign --force --deep --sign - --options runtime "$APP"
+SIGNING_IDENTITY="${SIGNING_IDENTITY:-PenBridge Local Signing}"
+if security find-identity -v -p codesigning 2>/dev/null | grep -qF "$SIGNING_IDENTITY"; then
+    echo "==> Signing as '$SIGNING_IDENTITY'"
+    codesign --force --deep --sign "$SIGNING_IDENTITY" --options runtime "$APP"
+else
+    echo "==> Signing (ad-hoc)"
+    codesign --force --deep --sign - --options runtime "$APP"
+    cat <<'WARNING'
+
+    Note: this build is ad-hoc signed, so macOS identifies it by the hash of its
+    contents. That hash changes every time you rebuild, and Input Monitoring and
+    Accessibility are granted against it — so you will be asked to grant them again
+    after every build.
+
+    Run Scripts/make-signing-cert.sh once to stop that happening.
+
+WARNING
+fi
 
 echo "==> Verifying"
 # Guard against the case-collision failure above, and against shipping a binary that
