@@ -13,6 +13,13 @@ public final class TabletDriverEngine {
     /// Called whenever the state changes, on an arbitrary thread.
     public var onStateChange: ((State) -> Void)?
 
+    /// Called for each press or release of the tablet's own buttons, on the HID thread.
+    ///
+    /// Reported whether or not the driver acts on them: knowing a button was pressed,
+    /// before macOS turns it into a keystroke, is what lets that keystroke be
+    /// recognised afterwards.
+    public var onExpressKey: ((ExpressKeyEvent) -> Void)?
+
     public private(set) var state: State = .waitingForTablet {
         didSet { if state != oldValue { onStateChange?(state) } }
     }
@@ -121,6 +128,12 @@ public final class TabletDriverEngine {
     // MARK: - Report processing
 
     private func process(device: TabletDevice, reportID: UInt8, payload: [UInt8]) {
+        if let keys = device.expressKeys, reportID == keys.reportID,
+           let event = keys.decode(payload) {
+            onExpressKey?(event)
+            return
+        }
+
         guard
             settings.isEnabled,
             reportID == device.layout.reportID,

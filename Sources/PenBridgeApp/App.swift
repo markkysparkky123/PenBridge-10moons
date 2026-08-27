@@ -11,14 +11,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var engine: TabletDriverEngine?
     private var statusItem: StatusItemController?
+    private let suppressor = ExpressKeySuppressor()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Permissions.request()
 
         let engine = TabletDriverEngine()
         self.engine = engine
-        self.statusItem = StatusItemController(engine: engine)
+
+        // The suppressor needs to know a tablet button was pressed before macOS turns
+        // it into a keystroke, which is the whole basis for telling the two apart.
+        engine.onExpressKey = { [weak self] event in
+            self?.suppressor.noteExpressKey(event)
+        }
+        self.statusItem = StatusItemController(engine: engine, suppressor: suppressor)
         engine.start()
+        applyExpressKeySuppression(engine.settings)
 
         // Plugging in a monitor or changing resolution invalidates the screen
         // geometry the mapper was built against.
@@ -47,7 +55,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        suppressor.stop()
         engine?.stop()
+    }
+
+    /// Starts or stops the event tap to match the setting. Kept here rather than in the
+    /// engine because it is a decision about the user's keyboard, not about the tablet.
+    func applyExpressKeySuppression(_ settings: Settings) {
+        if settings.suppressExpressKeys {
+            suppressor.start()
+        } else {
+            suppressor.stop()
+        }
     }
 
     fileprivate func reconfigureDisplays() {

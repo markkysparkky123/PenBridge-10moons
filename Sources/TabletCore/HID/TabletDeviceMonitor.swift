@@ -9,6 +9,8 @@ public final class TabletDevice {
     public let productID: Int
     public let name: String
     public let layout: PenReportLayout
+    /// The tablet's own buttons, when it has any.
+    public let expressKeys: ExpressKeyLayout?
     public let fields: [HIDReportField]
 
     /// Buffer handed to IOKit for input reports; must outlive the callback registration.
@@ -30,6 +32,7 @@ public final class TabletDevice {
         self.device = device
         self.fields = fields
         self.layout = layout
+        self.expressKeys = ExpressKeyLayout(fields: fields)
         self.vendorID = property(kIOHIDVendorIDKey, as: Int.self) ?? 0
         self.productID = property(kIOHIDProductIDKey, as: Int.self) ?? 0
         self.name = property(kIOHIDProductKey, as: String.self) ?? "Unknown tablet"

@@ -59,6 +59,9 @@ public struct Settings: Codable, Equatable, Sendable {
     /// Take the tablet exclusively so macOS's own HID driver stops generating its own
     /// plain mouse events from the same pen. See `TabletDeviceMonitor.seizeDevice`.
     public var seizeDevice: Bool
+    /// Discard the keystrokes the tablet's own buttons generate. Off by default: it
+    /// installs an event tap that can swallow keyboard input, so it is opt-in.
+    public var suppressExpressKeys: Bool
     /// Master switch for the menu-bar item.
     public var isEnabled: Bool
 
@@ -71,6 +74,7 @@ public struct Settings: Codable, Equatable, Sendable {
         calibration: Calibration = Calibration(),
         barrelSwitchRightClicks: Bool = true,
         seizeDevice: Bool = false,
+        suppressExpressKeys: Bool = false,
         isEnabled: Bool = true
     ) {
         self.area = area
@@ -81,12 +85,14 @@ public struct Settings: Codable, Equatable, Sendable {
         self.calibration = calibration
         self.barrelSwitchRightClicks = barrelSwitchRightClicks
         self.seizeDevice = seizeDevice
+        self.suppressExpressKeys = suppressExpressKeys
         self.isEnabled = isEnabled
     }
 
     private enum CodingKeys: String, CodingKey {
         case area, preserveAspectRatio, rotation, displayID, pressure
-        case calibration, barrelSwitchRightClicks, seizeDevice, isEnabled
+        case calibration, barrelSwitchRightClicks, seizeDevice
+        case suppressExpressKeys, isEnabled
     }
 
     /// Decoded field by field so a config written by an older build — one without
@@ -105,6 +111,8 @@ public struct Settings: Codable, Equatable, Sendable {
         barrelSwitchRightClicks = try container.decodeIfPresent(Bool.self, forKey: .barrelSwitchRightClicks)
             ?? defaults.barrelSwitchRightClicks
         seizeDevice = try container.decodeIfPresent(Bool.self, forKey: .seizeDevice) ?? defaults.seizeDevice
+        suppressExpressKeys = try container.decodeIfPresent(Bool.self, forKey: .suppressExpressKeys)
+            ?? defaults.suppressExpressKeys
         isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? defaults.isEnabled
     }
 

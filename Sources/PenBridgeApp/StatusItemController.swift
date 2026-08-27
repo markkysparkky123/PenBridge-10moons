@@ -9,6 +9,7 @@ final class StatusItemController {
 
     private let statusItem: NSStatusItem
     private let engine: TabletDriverEngine
+    private let suppressor: ExpressKeySuppressor
     private var settings: Settings {
         didSet {
             engine.settings = settings
@@ -17,8 +18,9 @@ final class StatusItemController {
         }
     }
 
-    init(engine: TabletDriverEngine) {
+    init(engine: TabletDriverEngine, suppressor: ExpressKeySuppressor) {
         self.engine = engine
+        self.suppressor = suppressor
         self.settings = engine.settings
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -112,6 +114,21 @@ final class StatusItemController {
             """
         menu.addItem(seize)
 
+        let suppress = NSMenuItem(
+            title: "Ignore the tablet's own buttons",
+            action: #selector(toggleSuppressExpressKeys), keyEquivalent: ""
+        )
+        suppress.target = self
+        suppress.state = settings.suppressExpressKeys ? .on : .off
+        suppress.toolTip = """
+            The tablet's buttons send fixed keyboard shortcuts from firmware, and macOS \
+            acts on them before this driver sees anything. Discarding them is the first \
+            step towards putting your own actions on those buttons. It works by watching \
+            keystrokes and dropping the ones a tablet button just caused — so it is off \
+            until you ask for it.
+            """
+        menu.addItem(suppress)
+
         menu.addItem(.separator())
         menu.addItem(submenu(
             title: "Rotation",
@@ -192,6 +209,25 @@ final class StatusItemController {
 
     @objc private func toggleSeize() {
         settings.seizeDevice.toggle()
+    }
+
+    @objc private func toggleSuppressExpressKeys() {
+        settings.suppressExpressKeys.toggle()
+        if settings.suppressExpressKeys {
+            suppressor.start()
+            if !suppressor.isRunning {
+                settings.suppressExpressKeys = false
+                let alert = NSAlert()
+                alert.messageText = "Could not watch the keyboard"
+                alert.informativeText = """
+                    Creating the event tap failed. This needs Accessibility permission, \
+                    which is the same grant the pen uses to move the cursor.
+                    """
+                alert.runModal()
+            }
+        } else {
+            suppressor.stop()
+        }
     }
 
     @objc private func selectRotation(_ sender: NSMenuItem) {
