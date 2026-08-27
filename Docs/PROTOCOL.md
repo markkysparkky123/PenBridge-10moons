@@ -113,30 +113,40 @@ without any initialization, so nothing needs to be sent to the tablet to make it
 
 Anything in this section is empirical rather than declared, and can differ between units.
 
-Measured on one unit over 1901 samples, tracing all four edges of the drawing area and
-pressing firmly in the centre:
+Measured on one unit across several runs, tracing all four edges of the drawing area and
+pressing in the centre:
 
 | Property | Declared | Measured |
 |---|---|---|
 | X range | 0…4096 | **0…4095** |
 | Y range | 0…4096 | **0…4095** |
-| Pressure | 0…2047 | **5…1685** |
-
-Two things worth knowing:
+| Pressure | 0…2047 | **15…2005** |
 
 **The declared maximum is one too high.** The hardware never emits 4096 on either axis.
 Mapping against the declared range leaves the last fraction of a pixel unreachable —
-harmless in itself, but it is a reminder that the descriptor is a claim, not a
-measurement.
+harmless in itself, but a reminder that the descriptor is a claim, not a measurement.
 
-**A firm press only reaches 82% of the pressure scale.** With a straight-through
-pressure curve the pen can never produce full pressure, so brushes never reach their
-maximum width or opacity no matter how hard you press. This is the single most
-noticeable difference a calibration makes, and it is why `PressureCurve` carries an
-upper threshold. `penbridge-cli calibrate --apply` sets it from the measurement.
+**The pressure sensor is good.** It responds smoothly and proportionally to force across
+almost the whole declared range. An earlier revision of this document reported a ceiling
+of 1685, about 82% of scale, and treated it as a property of the hardware. It was not:
+it was a calibration run where the pen was not pressed as hard as it is during actual
+drawing. Setting the ceiling from that measurement made every heavier press map to full
+pressure, so strokes jumped straight to maximum weight — a fault introduced by the
+measurement, not found by it.
 
-Both figures come from one unit and one hand. Other tablets — and other people —
-will differ, which is why they live in the config rather than in the source.
+The lesson generalises: when calibrating pressure, press as hard as you ever will, and
+treat a measured ceiling well below the declared maximum as suspect rather than as fact.
+`penbridge-cli pressure` shows saturation live, and `calibrate --apply` now warns when
+the ceiling it is about to write looks too low.
+
+These figures come from one unit and one hand, which is why they live in the config
+rather than in the source.
+
+### An undocumented status bit
+
+Bit 7 of the flags byte is declared as padding but is set in every report observed while
+the pen is in range (`0xC0` hovering, `0xC1` with the tip down). Its meaning is unknown.
+It is ignored, and reserved bits like this are worth leaving alone rather than guessing at.
 
 ### The device can wedge
 
