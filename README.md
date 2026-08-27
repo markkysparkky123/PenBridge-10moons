@@ -23,6 +23,34 @@ hardware verification pass. Expect rough edges.
 - Adjustable pen feel (pressure curve)
 - Hot-plug
 
+## Application compatibility
+
+Pressure is delivered three ways at once, because applications disagree about where to
+look for it: proximity events, standalone `NSEventTypeTabletPoint` events, and mouse
+events carrying tablet data in their subtype. That is what a real tablet produces.
+
+Tested on macOS 26:
+
+| Application | Toolkit | Pressure |
+|---|---|---|
+| `penbridge-cli nsprobe` | AppKit | works |
+| HuePaint | AppKit | works |
+| MediBang Paint Pro | Qt 5.5 | works |
+| FireAlpaca 2 | Qt 5.4 | no response |
+| OpenToonz 1.7.1 | Qt 5.15 | no response |
+
+Both Qt and AppKit applications read the pen correctly, so an application that ignores
+pressure is not evidence that the driver is failing — check its own settings first.
+
+The usual culprit is a brush whose size is configured as a **range**, with the minimum
+and maximum set to the same value. Pressure then varies a quantity that cannot change,
+and the setting that enables it looks correctly switched on. OpenToonz's Brush tool
+options are like this: `Size` has separate minimum and maximum handles.
+
+If you find a real incompatibility, `penbridge-cli nsprobe` produces the evidence worth
+attaching to a bug report: it shows the event counts and pressure values an application
+is being sent.
+
 ## What does not, and will not
 
 **Tilt.** The hardware does not sense it. No driver can add it — see
