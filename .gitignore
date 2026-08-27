@@ -1,6 +1,17 @@
+# Build output
 .build/
 build/
 .swiftpm/
+
+# macOS
 .DS_Store
+
+# Xcode
 *.xcuserstate
 xcuserdata/
+
+# Editor and tooling config that is specific to one machine
+.claude/
+
+# Diagnostic captures — these contain whatever was on your screen or tablet
+*.log
