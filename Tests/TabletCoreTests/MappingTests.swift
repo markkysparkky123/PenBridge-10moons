@@ -165,6 +165,32 @@ struct AreaMapperTests {
         #expect(explicit == implicit)
     }
 
+    @Test("An area already matching the screen's shape is left untouched")
+    func alreadyProportional() {
+        let layout = makeLayout()
+        let heightMM = layout.heightMM!
+        let widthMM = layout.widthMM!
+
+        // Full tablet width, and exactly the height that matches 16:9, starting below
+        // the soft-key strip along the top edge.
+        let topStrip = 0.059
+        let neededHeightMM = widthMM / (1920.0 / 1080.0)
+        let chosen = CGRect(
+            x: 0, y: topStrip, width: 1, height: neededHeightMM / heightMM
+        )
+
+        let trimmed = AreaMapper.proportionalArea(layout: layout, screen: fullHD, within: chosen)
+
+        // Nothing is trimmed: the pen reaches the screen edge exactly at the edge of
+        // the chosen area, with no dead band.
+        #expect(abs(trimmed.width - chosen.width) < 0.0005)
+        #expect(abs(trimmed.height - chosen.height) < 0.0005)
+        #expect(abs(trimmed.minY - chosen.minY) < 0.0005)
+
+        // And it stays on the tablet.
+        #expect(chosen.maxY <= 1.0)
+    }
+
     @Test("A sub-area covers the whole screen")
     func subArea() {
         let layout = makeLayout()
