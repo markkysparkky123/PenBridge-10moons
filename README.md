@@ -9,9 +9,9 @@ macOS 10.13. That driver runs on Apple Silicon today only through Rosetta 2, whi
 being wound down. PenBridge does the same job as a native `arm64` build, from source
 you can read.
 
-**Status: working, young.** Verified on real hardware: the cursor tracks, clicks land,
-and pressure reaches drawing applications. Area mapping is not yet adjustable beyond
-proportions and rotation, and the tablet's own buttons cannot be remapped.
+**Status: working, young.** Verified on real hardware against four drawing applications:
+the cursor tracks, clicks land, and pressure gets through. The tablet's own buttons keep
+their firmware shortcuts — see below for why that is harder than it looks.
 
 ## What works
 
@@ -21,6 +21,9 @@ proportions and rotation, and the tablet's own buttons cannot be remapped.
 - Proportional area mapping, so a circle drawn on the tablet is a circle on screen
 - Rotation in 90° steps
 - Adjustable pen feel (pressure curve)
+- Per-tablet calibration, because the descriptor's declared ranges are not the truth
+- Choosing the active area by tapping two corners
+- Starts at login
 - Hot-plug
 
 ## Application compatibility
@@ -61,9 +64,29 @@ is being sent.
 **Tilt.** The hardware does not sense it. No driver can add it — see
 [Docs/PROTOCOL.md](Docs/PROTOCOL.md).
 
-**Remapping the express keys** is not implemented yet. The buttons send fixed
-keyboard shortcuts from firmware; intercepting and substituting them is possible but not
-done.
+**Remapping the tablet's buttons** is not implemented, and the reason is worth stating
+because the obvious approaches do not work.
+
+The buttons send fixed shortcuts from firmware — brush, eraser, brush size, zoom, pan,
+colour picker — and macOS acts on them before this driver sees anything. Seizing the
+device does not stop that: `IOHIDDeviceOpen` with `kIOHIDOptionsTypeSeizeDevice` reports
+success while the volume keeps changing, because the system's HID driver runs in a
+DriverKit process of its own.
+
+The vendor's driver manages it by writing a new key table into the tablet, through the
+vendor-defined configuration channel — it contains no event tap at all, so it cannot be
+doing anything else. That is the right mechanism: the device then sends what you asked
+for, with nothing to intercept and nothing to go wrong when the driver is not running.
+The format of those writes has not been decoded. Doing so means capturing the vendor
+driver's `IOHIDDeviceSetReport` calls, and acting on it means writing to the device,
+which is the one operation here that could leave a tablet needing the vendor's own
+software to recover. Contributions welcome; see [Docs/PROTOCOL.md](Docs/PROTOCOL.md) for
+what the buttons currently send.
+
+There is an opt-in **Ignore the tablet's own buttons** switch that discards the
+keystrokes rather than replacing them, for anyone who finds the firmware shortcuts get
+in the way. It covers the keyboard-type buttons only — the touch strip sends media
+controls, which take a different path and pass through untouched.
 
 ## Requirements
 
