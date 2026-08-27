@@ -77,6 +77,7 @@ public final class TabletEventSynthesizer {
     private var isTipDown = false
     private var isBarrelDown = false
     private var lastLocation = CGPoint.zero
+    private var lastPressure = 0.0
 
     public init(vendorID: Int, productID: Int, configuration: Configuration = Configuration()) {
         self.vendorID = Int64(vendorID)
@@ -179,9 +180,14 @@ public final class TabletEventSynthesizer {
             isBarrelDown = wantsBarrel
         }
 
-        // Only emit motion when the pen actually moved, otherwise a stationary pen
-        // floods the event stream at the tablet's full report rate.
-        guard location != lastLocation else { return }
+        // Only emit motion when something actually changed, otherwise a resting pen
+        // floods the event stream at the tablet's full report rate. Pressure counts as
+        // a change in its own right: pressing harder without moving is a real event,
+        // and dropping it makes a stroke's weight lag behind the hand.
+        let moved = location != lastLocation
+        let pressureChanged = abs(pressure - lastPressure) > 0.002
+        guard moved || pressureChanged else { return }
+        lastPressure = pressure
 
         let type: CGEventType
         if isTipDown {
@@ -209,6 +215,9 @@ public final class TabletEventSynthesizer {
         if report.eraser { buttonMask |= 1 << 2 }
 
         event.setIntegerValueField(.mouseEventSubtype, value: MouseSubtype.tabletPoint.rawValue)
+        // Some applications read NSEvent.pressure straight off the mouse event rather
+        // than digging into the tablet payload, so fill both.
+        event.setDoubleValueField(.mouseEventPressure, value: pressure)
         event.setIntegerValueField(.tabletEventDeviceID, value: deviceID)
         event.setIntegerValueField(.tabletEventPointX, value: Int64(report.x))
         event.setIntegerValueField(.tabletEventPointY, value: Int64(report.y))
