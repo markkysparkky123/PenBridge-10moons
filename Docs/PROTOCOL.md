@@ -75,7 +75,7 @@ Seven bytes of payload, following the report-ID byte.
 | Offset | Size | Field |
 |---|---|---|
 | bit 0 | 1 | Tip switch |
-| bit 1 | 1 | Barrel switch |
+| bit 1 | 1 | Barrel switch — **declared, never sent**; see below |
 | bit 2 | 1 | Eraser |
 | bit 3 | 1 | Invert (pen held upside down) |
 | bits 4–5 | 2 | padding |
@@ -100,6 +100,20 @@ roughly 3:2 (1.498:1).
 Note that the two axes share a logical range but not a physical one: one logical unit
 is 0.0496 mm horizontally and 0.0331 mm vertically. Any aspect-ratio arithmetic has to
 be done in millimetres, or circles come out as ellipses.
+
+### The barrel switch is declared but never sent
+
+The descriptor declares a barrel switch on bit 1, and the pen has two side buttons, so the
+obvious reading is that they are the same thing. They are not. Pressing either button —
+hovering or with the tip down — leaves the flags byte at `0xC0` or `0xC1` and sends a
+*keyboard* report instead: `+` is Ctrl+Y, `−` is Ctrl+Z, indistinguishable in form from
+the buttons on the case.
+
+Across every measured session bit 1 has never been set. A driver offering to turn the
+barrel switch into a right-click therefore has nothing to act on, however correct its
+code, and looks broken for a reason that is not in the driver at all.
+
+The bit is left decoded, since it costs nothing and another unit may well wire it.
 
 ### No tilt
 
@@ -129,14 +143,23 @@ Measured on a unit with buttons down the right edge, each pressed once, captured
 | `01 00 00` | Ctrl alone | |
 | `04 00 00` | Alt alone | |
 | `08 00 07` | Cmd + `D` | |
-| `01 00 1C` | Ctrl + `Y` | |
-| `01 00 1D` | Ctrl + `Z` | |
 
-A photo-editing default set — undo, redo, brush, eraser, brush size, zoom. Each button
-sends a distinct code, so they can be told apart.
+A photo-editing default set — brush, eraser, brush size, zoom. Each button sends a
+distinct code, so they can be told apart.
+
+**The pen's two side buttons arrive here too**, on the same report as the buttons on the
+case:
+
+| Report | Key | Marked on the pen |
+|---|---|---|
+| `01 00 1C` | Ctrl + `Y` | `+` |
+| `01 00 1D` | Ctrl + `Z` | `−` |
 
 Note what is **not** in this table: the two scroll buttons. They send nothing at all on
 this interface. See below.
+
+That accounts for every button on the unit: twelve on the case — ten keyboard, two scroll
+— and two on the pen.
 
 ### Ctrl+Z will suspend whatever is in your terminal
 
