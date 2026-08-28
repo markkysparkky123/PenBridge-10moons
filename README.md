@@ -1,3 +1,4 @@
+<img width="1280" height="720" alt="-2147483648_-210506" src="https://github.com/user-attachments/assets/0b4ecb86-997d-4a93-9815-aae1cac48d63" />
 # PenBridge
 
 An open-source macOS driver for cheap USB graphics tablets, built natively for Apple
