@@ -1,3 +1,4 @@
+import ApplicationServices
 import CoreGraphics
 import Foundation
 import IOKit.hid
@@ -14,6 +15,7 @@ USAGE
   penbridge calibrate   Track the true min/max of X, Y and pressure while you move the pen
   penbridge pressure    Live pressure meter: raw reading, configured band, mapped output
   penbridge area        Choose the active area by tapping two opposite corners
+  penbridge buttons     Show what each tablet button sends, and what macOS makes of it
   penbridge probe       Log the tablet events another driver is posting (needs Accessibility)
   penbridge nsprobe     Open a scratch window and draw in it — shows what an app receives
 
@@ -30,7 +32,7 @@ let arguments = CommandLine.arguments.dropFirst()
 let command = arguments.first(where: { !$0.hasPrefix("-") }) ?? "info"
 let seize = arguments.contains("--seize")
 let apply = arguments.contains("--apply")
-guard ["info", "dump", "calibrate", "probe", "pressure", "nsprobe", "area"].contains(command) else {
+guard ["info", "dump", "calibrate", "probe", "pressure", "nsprobe", "area", "buttons"].contains(command) else {
     print(usage)
     exit(command == "help" || command == "--help" ? 0 : 2)
 }
@@ -115,6 +117,13 @@ func describe(_ device: TabletDevice) -> String {
 
 let monitor = TabletDeviceMonitor()
 monitor.seizeDevice = seize
+
+/// Built only for `buttons`, so the taps are not installed for any other mode.
+let buttonProbe: ButtonProbe? = command == "buttons"
+    ? ButtonProbe(logURL: Settings.storeURL
+        .deletingLastPathComponent()
+        .appendingPathComponent("buttons.log"))
+    : nil
 
 /// Running extremes, used by `calibrate`.
 final class Extremes {
@@ -205,6 +214,7 @@ let extremes = Extremes()
 monitor.onAttach = { device in
     print("\n── tablet connected ──")
     print(describe(device))
+    buttonProbe?.line("── tablet connected: \(device.identifier)")
     switch command {
     case "dump":
         print("\nStreaming reports. Move the pen over the tablet.\n")
@@ -250,6 +260,7 @@ monitor.onAttach = { device in
 
 monitor.onDetach = { device in
     print("── tablet disconnected: \(device.identifier) ──")
+    buttonProbe?.line("── tablet disconnected: \(device.identifier)")
 }
 
 let areaSetup = AreaSetup()
@@ -302,12 +313,28 @@ let traffic = Traffic()
 
 monitor.onLog = { message in
     FileHandle.standardError.write(Data("!! \(message)\n".utf8))
+    buttonProbe?.line("!! \(message)")
+}
+
+monitor.onAuxReport = { interface, event in
+    traffic.total += 1
+    if let buttonProbe {
+        buttonProbe.handleAux(interface, event)
+        return
+    }
+    guard command == "dump", !event.isIdle else { return }
+    print("wheel \(event.wheel)  buttons \(event.buttons)   [second interface]")
 }
 
 monitor.onReport = { device, reportID, payload in
     traffic.total += 1
     traffic.byReportID[reportID, default: 0] += 1
     if reportID == device.layout.reportID { traffic.pen += 1 }
+
+    if let buttonProbe {
+        buttonProbe.handle(device: device, reportID: reportID, payload: payload)
+        return
+    }
 
     guard ["dump", "calibrate", "pressure", "area"].contains(command) else { return }
 
@@ -455,6 +482,7 @@ if command == "probe" {
         extremes.save(layout: extremes.layout)
         applyCalibration()
         print("")
+        buttonProbe?.printSummary()
         exit(0)
     }
     interrupts.resume()
@@ -462,10 +490,73 @@ if command == "probe" {
     monitor.start()
     print("penbridge \(command) — looking for tablets. Ctrl-C to stop.")
 
+    if let buttonProbe {
+        guard AXIsProcessTrustedWithOptions(
+            [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
+        ) else {
+            FileHandle.standardError.write(Data("""
+
+                Accessibility access is required to observe events.
+                Approve it in System Settings > Privacy & Security > Accessibility,
+                then run `penbridge buttons` again.
+
+                """.utf8))
+            exit(1)
+        }
+        // One of this tablet's buttons sends Ctrl+Z, which a terminal turns into SIGTSTP
+        // and suspends whatever is running in the foreground — including this. A tool
+        // whose entire purpose is to watch buttons that send control characters cannot
+        // afford to be stopped by one of them. Ctrl-C still quits.
+        signal(SIGTSTP, SIG_IGN)
+
+        _ = buttonProbe.startTaps()
+        print("""
+
+            Press the tablet's buttons — one at a time, with a pause between them. Order
+            does not matter, and neither does using the keyboard or the mouse in between:
+            each event is credited to the tablet report that came just before it, and
+            anything with no tablet report behind it is listed separately as yours.
+
+            Worth covering: every button down the side, the strip, both buttons on the
+            pen while it hovers, and the pen turned over.
+
+            Press Ctrl-C when done. The summary is the point — the running lines are just
+            there to show it is alive:
+
+              HID  — what the tablet sent, straight off the wire
+              EVT  — what macOS made of it, at two levels of the event stack
+
+            A button whose event appears only at [session] is one no HID-level suppressor
+            can catch. A button with no event at all is handled somewhere neither tap sees.
+
+            Everything is also appended to
+            \(Settings.storeURL.deletingLastPathComponent().appendingPathComponent("buttons.log").path)
+
+            """)
+    }
+
     // Silence is ambiguous: it can mean the pen is out of range, the device never
     // opened, or another driver holds it. A periodic summary tells them apart.
     var quietTicks = 0
     var lastTotal = 0
+
+    // A probe run that recorded nothing but the user's own typing looks exactly like a
+    // run where the buttons did nothing — and the difference is usually that the tablet
+    // is not on the bus at all. Say so, in the log as well as on screen, or the evidence
+    // is a file full of keystrokes with no hint of what is missing.
+    if let buttonProbe {
+        var silentTicks = 0
+        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+            guard traffic.total == 0 else { return }
+            silentTicks += 1
+            buttonProbe.line("""
+                !! no reports from any tablet after \(silentTicks * 5)s — nothing here \
+                came from the tablet. Check it is plugged in (`penbridge-cli info`); this \
+                device is known to drop off the USB bus and need the cable replugged.
+                """)
+        }
+    }
+
     Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
         guard command == "dump" || command == "calibrate" else { return }
         if traffic.total == lastTotal {
