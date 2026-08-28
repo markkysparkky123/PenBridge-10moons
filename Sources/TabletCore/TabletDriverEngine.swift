@@ -20,6 +20,12 @@ public final class TabletDriverEngine {
     /// recognised afterwards.
     public var onTabletButton: ((TabletButtonEvent) -> Void)?
 
+    /// Vendor and product of the tablet currently attached.
+    ///
+    /// For the few things that cannot be read off a descriptor — which keystroke the pen's
+    /// buttons send, say — and nothing else. See `KnownTablets`.
+    public private(set) var connectedTablet: (vendorID: Int, productID: Int)?
+
     public private(set) var state: State = .waitingForTablet {
         didSet { if state != oldValue { onStateChange?(state) } }
     }
@@ -74,6 +80,7 @@ public final class TabletDriverEngine {
     private func attach(_ device: TabletDevice) {
         guard self.device == nil else { return }
         self.device = device
+        self.connectedTablet = (device.vendorID, device.productID)
 
         var configuration = TabletEventSynthesizer.Configuration()
         configuration.barrelSwitchRightClicks = settings.barrelSwitchRightClicks
@@ -96,6 +103,7 @@ public final class TabletDriverEngine {
         synthesizer = nil
         mapper = nil
         self.device = nil
+        self.connectedTablet = nil
         state = .waitingForTablet
     }
 

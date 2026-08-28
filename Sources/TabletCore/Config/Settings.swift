@@ -62,6 +62,14 @@ public struct Settings: Codable, Equatable, Sendable {
     /// Discard the keystrokes the tablet's own buttons generate. Off by default: it
     /// installs an event tap that can swallow keyboard input, so it is opt-in.
     public var suppressExpressKeys: Bool
+    /// What each of the tablet's own buttons should do instead of its firmware shortcut.
+    /// A button not listed here keeps its firmware behaviour, or is discarded when
+    /// `suppressExpressKeys` is on.
+    ///
+    /// A list rather than a dictionary: `ButtonSource` is an enum with associated values,
+    /// and `Codable` renders such keys as a flat array of alternating entries, which turns
+    /// a config file people are meant to be able to read into a puzzle.
+    public var buttonBindings: [ButtonBinding]
     /// Master switch for the menu-bar item.
     public var isEnabled: Bool
 
@@ -75,6 +83,7 @@ public struct Settings: Codable, Equatable, Sendable {
         barrelSwitchRightClicks: Bool = true,
         seizeDevice: Bool = false,
         suppressExpressKeys: Bool = false,
+        buttonBindings: [ButtonBinding] = [],
         isEnabled: Bool = true
     ) {
         self.area = area
@@ -86,13 +95,39 @@ public struct Settings: Codable, Equatable, Sendable {
         self.barrelSwitchRightClicks = barrelSwitchRightClicks
         self.seizeDevice = seizeDevice
         self.suppressExpressKeys = suppressExpressKeys
+        self.buttonBindings = buttonBindings
         self.isEnabled = isEnabled
+    }
+
+    /// What the user wants this button to do.
+    ///
+    /// An unbound button keeps its firmware behaviour unless the blanket "ignore the
+    /// tablet's own buttons" switch is on, which is what makes the two features one thing
+    /// rather than two that fight.
+    public func action(for source: ButtonSource) -> ButtonAction {
+        if let binding = buttonBindings.first(where: { $0.source == source }) {
+            return binding.action
+        }
+        return suppressExpressKeys ? .ignore : .passThrough
+    }
+
+    public mutating func bind(_ source: ButtonSource, to action: ButtonAction) {
+        buttonBindings.removeAll { $0.source == source }
+        // Nothing is stored for a button left alone: the absence *is* the setting, and
+        // writing it down would make a config file full of entries that do nothing.
+        guard action != .passThrough else { return }
+        buttonBindings.append(ButtonBinding(source: source, action: action))
+    }
+
+    /// Whether anything here needs the event tap running, regardless of the blanket switch.
+    public var needsEventTap: Bool {
+        suppressExpressKeys || !buttonBindings.isEmpty
     }
 
     private enum CodingKeys: String, CodingKey {
         case area, preserveAspectRatio, rotation, displayID, pressure
         case calibration, barrelSwitchRightClicks, seizeDevice
-        case suppressExpressKeys, isEnabled
+        case suppressExpressKeys, buttonBindings, isEnabled
     }
 
     /// Decoded field by field so a config written by an older build — one without
@@ -113,6 +148,8 @@ public struct Settings: Codable, Equatable, Sendable {
         seizeDevice = try container.decodeIfPresent(Bool.self, forKey: .seizeDevice) ?? defaults.seizeDevice
         suppressExpressKeys = try container.decodeIfPresent(Bool.self, forKey: .suppressExpressKeys)
             ?? defaults.suppressExpressKeys
+        buttonBindings = try container.decodeIfPresent([ButtonBinding].self, forKey: .buttonBindings)
+            ?? defaults.buttonBindings
         isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? defaults.isEnabled
     }
 

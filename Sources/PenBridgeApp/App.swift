@@ -25,7 +25,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         engine.onTabletButton = { [weak self] event in
             self?.suppressor.note(event)
         }
-        self.statusItem = StatusItemController(engine: engine, suppressor: suppressor)
+        let statusItem = StatusItemController(engine: engine, suppressor: suppressor)
+        statusItem.onBindingsChanged = { [weak self] settings in
+            self?.applyExpressKeySuppression(settings)
+        }
+        self.statusItem = statusItem
         engine.start()
         applyExpressKeySuppression(engine.settings)
 
@@ -60,10 +64,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         engine?.stop()
     }
 
-    /// Starts or stops the event tap to match the setting. Kept here rather than in the
+    /// Starts or stops the event tap to match the settings. Kept here rather than in the
     /// engine because it is a decision about the user's keyboard, not about the tablet.
+    ///
+    /// The tap is needed for a bound button as much as for the blanket switch: remapping
+    /// a button means swallowing what it sent and sending something else, and the first
+    /// half of that is the same machinery.
     func applyExpressKeySuppression(_ settings: Settings) {
-        if settings.suppressExpressKeys {
+        suppressor.action = { [weak self] source in
+            self?.engine?.settings.action(for: source) ?? .passThrough
+        }
+        if settings.needsEventTap {
             suppressor.start()
         } else {
             suppressor.stop()

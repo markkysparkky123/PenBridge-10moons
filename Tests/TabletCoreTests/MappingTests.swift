@@ -268,3 +268,92 @@ struct PressureCurveTests {
         #expect(restored == settings)
     }
 }
+
+@Suite("Button bindings")
+struct ButtonBindingTests {
+
+    private let penPlus = ButtonSource.key(modifiers: 0x01, usage: 0x1C)
+
+    @Test("An unbound button keeps its firmware behaviour")
+    func unboundPassesThrough() {
+        let settings = Settings()
+        #expect(settings.action(for: penPlus) == .passThrough)
+        #expect(!settings.needsEventTap)
+    }
+
+    @Test("The blanket switch discards anything not bound to something else")
+    func blanketSwitch() {
+        var settings = Settings()
+        settings.suppressExpressKeys = true
+        #expect(settings.action(for: penPlus) == .ignore)
+
+        // A binding outranks the blanket switch, or the two features would fight and the
+        // one the user set deliberately would lose.
+        settings.bind(penPlus, to: .rightClick)
+        #expect(settings.action(for: penPlus) == .rightClick)
+        #expect(settings.action(for: .wheel(up: true)) == .ignore)
+    }
+
+    @Test("A binding needs the event tap even with the blanket switch off")
+    func bindingNeedsTap() {
+        var settings = Settings()
+        #expect(!settings.needsEventTap)
+        settings.bind(penPlus, to: .middleClick)
+        #expect(settings.needsEventTap)
+    }
+
+    @Test("Binding back to Leave alone stores nothing rather than storing a no-op")
+    func unbinding() {
+        var settings = Settings()
+        settings.bind(penPlus, to: .rightClick)
+        #expect(settings.buttonBindings.count == 1)
+
+        settings.bind(penPlus, to: .passThrough)
+        #expect(settings.buttonBindings.isEmpty)
+        #expect(!settings.needsEventTap)
+    }
+
+    @Test("Rebinding replaces rather than accumulating")
+    func rebinding() {
+        var settings = Settings()
+        settings.bind(penPlus, to: .rightClick)
+        settings.bind(penPlus, to: .middleClick)
+        #expect(settings.buttonBindings.count == 1)
+        #expect(settings.action(for: penPlus) == .middleClick)
+    }
+
+    @Test("Bindings survive a round trip through JSON")
+    func codable() throws {
+        var settings = Settings()
+        settings.bind(penPlus, to: .rightClick)
+        settings.bind(.consumer(usage: 0x00E9), to: .ignore)
+        settings.bind(.wheel(up: false), to: .middleClick)
+
+        let data = try JSONEncoder().encode(settings)
+        let restored = try JSONDecoder().decode(Settings.self, from: data)
+        #expect(restored == settings)
+        #expect(restored.action(for: penPlus) == .rightClick)
+    }
+
+    @Test("A config written before bindings existed still loads")
+    func migration() throws {
+        // The field is absent, not empty. Falling back to defaults wholesale here would
+        // silently discard a calibration someone spent time on.
+        let json = Data(#"{"rotation":90,"seizeDevice":true}"#.utf8)
+        let settings = try JSONDecoder().decode(Settings.self, from: json)
+        #expect(settings.buttonBindings.isEmpty)
+        #expect(settings.seizeDevice)
+        #expect(settings.rotation == .ninety)
+    }
+
+    @Test("The pen's buttons are known for the tablet this was written for")
+    func knownPenButtons() throws {
+        let pen = try #require(KnownTablets.penButtons(vendorID: 0x08F2, productID: 0x6811))
+        // Measured, not guessed: `+` sends Ctrl+Y and `−` Ctrl+Z.
+        #expect(pen.plus == .key(modifiers: 0x01, usage: 0x1C))
+        #expect(pen.minus == .key(modifiers: 0x01, usage: 0x1D))
+
+        // Anything else has to be measured before it can be offered.
+        #expect(KnownTablets.penButtons(vendorID: 0x1234, productID: 0x5678) == nil)
+    }
+}

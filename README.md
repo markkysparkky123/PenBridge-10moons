@@ -10,14 +10,15 @@ being wound down. PenBridge does the same job as a native `arm64` build, from so
 you can read.
 
 **Status: working, young.** Verified on real hardware against four drawing applications:
-the cursor tracks, clicks land, and pressure gets through. The tablet's own buttons keep
-their firmware shortcuts — see below for why that is harder than it looks.
+the cursor tracks, clicks land, and pressure gets through. The tablet's own buttons can be
+silenced or given something else to do — see below for why that took more than it looks.
 
 ## What works
 
 - Absolute cursor positioning from the pen
 - 2048 pressure levels, delivered as proper tablet events so drawing applications see them
-- Tip, barrel and eraser switches
+- Tip and eraser switches
+- The pen's side buttons, remappable to a right or middle click
 - Proportional area mapping, so a circle drawn on the tablet is a circle on screen
 - Rotation in 90° steps
 - Adjustable pen feel (pressure curve)
@@ -64,29 +65,41 @@ is being sent.
 **Tilt.** The hardware does not sense it. No driver can add it — see
 [Docs/PROTOCOL.md](Docs/PROTOCOL.md).
 
-**Remapping the tablet's buttons** is not implemented, and the reason is worth stating
-because the obvious approaches do not work.
+**The pen's barrel switch**, on this hardware. The descriptor declares it and the pen has
+two side buttons, so the obvious reading is that they are the same thing. They are not:
+pressing either one leaves the barrel bit clear and sends a keystroke instead. The bit has
+never been seen set. PenBridge still decodes it, since another unit may well wire it, but
+on this one there is nothing there to offer.
 
-The buttons send fixed shortcuts from firmware — brush, eraser, brush size, zoom, pan,
-colour picker — and macOS acts on them before this driver sees anything. Seizing the
-device does not stop that: `IOHIDDeviceOpen` with `kIOHIDOptionsTypeSeizeDevice` reports
-success while the volume keeps changing, because the system's HID driver runs in a
-DriverKit process of its own.
+The side buttons are not lost, though — see below.
 
-The vendor's driver manages it by writing a new key table into the tablet, through the
-vendor-defined configuration channel — it contains no event tap at all, so it cannot be
-doing anything else. That is the right mechanism: the device then sends what you asked
-for, with nothing to intercept and nothing to go wrong when the driver is not running.
-The format of those writes has not been decoded. Doing so means capturing the vendor
-driver's `IOHIDDeviceSetReport` calls, and acting on it means writing to the device,
-which is the one operation here that could leave a tablet needing the vendor's own
-software to recover. Contributions welcome; see [Docs/PROTOCOL.md](Docs/PROTOCOL.md) for
-what the buttons currently send.
+## The tablet's own buttons
 
-There is an opt-in **Ignore the tablet's own buttons** switch that discards what the
-buttons send rather than replacing it, for anyone who finds the firmware shortcuts get in
-the way. It covers all three kinds, which is worth spelling out because they are three
-genuinely different mechanisms and covering two of them looks identical to covering all:
+The buttons send fixed shortcuts from firmware, and macOS acts on them before this driver
+sees anything. Seizing the device does not stop that: `IOHIDDeviceOpen` with
+`kIOHIDOptionsTypeSeizeDevice` reports success while the volume keeps changing, because
+the system's HID driver runs in a DriverKit process of its own.
+
+So they are taken over after the fact instead: the event macOS produced is recognised by
+the tablet report that caused it, discarded, and replaced by whatever you asked for. Two
+things use this — an opt-in **Ignore the tablet's own buttons** switch that silences them
+all, and a **Pen buttons** menu that gives the pen's `+` and `−` a right or middle click.
+A button you have bound keeps its binding whether or not the blanket switch is on.
+
+Both need Accessibility, and both only work while PenBridge is running. The alternative —
+writing a new key table into the tablet through the vendor's configuration channel, which
+is what the vendor's own driver does — would survive without any driver at all, but the
+format of those writes has not been decoded, and acting on it means writing to the device:
+the one operation here that could leave a tablet needing the vendor's software to recover.
+Contributions welcome.
+
+Which keystroke the pen's buttons send has to be measured once per model — nothing in the
+descriptor distinguishes them from the buttons on the case. If the **Pen buttons** menu
+says it has no measurement for your tablet, `penbridge-cli buttons` produces one.
+
+Suppression covers all three kinds of button, which is worth spelling out because they are
+three genuinely different mechanisms and covering two of them looks identical to covering
+all:
 
 | Buttons | What they send | What macOS makes of it |
 |---|---|---|

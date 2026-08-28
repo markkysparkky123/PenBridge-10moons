@@ -56,6 +56,10 @@ final class ExpressKeySuppressor {
     /// Written from the HID thread and read from the main run loop's tap callback,
     /// so every access is guarded.
     private var pending: [PendingPress] = []
+    /// What the tablet says is down right now. Held entries do not age out the way pending
+    /// ones do: a button can be held for as long as a finger stays on it, and the tablet
+    /// says nothing further until it is let go.
+    private var held: [PendingPress] = []
     private var pendingWheel: [PendingWheel] = []
     /// Whether a consumer-control button is currently down, and when we last heard about
     /// it. Scroll is not a single event: macOS emits a stream of them for as long as the
@@ -63,6 +67,8 @@ final class ExpressKeySuppressor {
     /// keystrokes are.
     private var consumerHeld = false
     private var consumerAt = Date.distantPast
+    /// Which usage is down, so a binding can name the button rather than just "the strip".
+    private var consumerUsage: UInt16 = 0
     private var tabletConnected = false
     private let lock = NSLock()
     private var tap: CFMachPort?
@@ -71,6 +77,10 @@ final class ExpressKeySuppressor {
     /// Reported for anything actually discarded, so the behaviour is observable rather
     /// than a silent hole in the user's input.
     var onSuppressed: ((String) -> Void)?
+
+    /// What the user wants a given button to do. Consulted on every match, so changing a
+    /// binding takes effect at once rather than on the next launch.
+    var action: ((ButtonSource) -> ButtonAction)?
 
     var isRunning: Bool { tap != nil }
 
@@ -102,19 +112,30 @@ final class ExpressKeySuppressor {
 
         switch event {
         case .keyboard(let key):
-            guard !key.isRelease else { return }
+            guard !key.isRelease else {
+                // The key-up events are still to come, and on this hardware they arrive a
+                // quarter of a second after the press — long past the window. Re-stamping
+                // what was held is what lets them be recognised too; without it a press is
+                // swallowed and its release is not, leaving applications holding a key
+                // they never saw go down.
+                for entry in held {
+                    pending.append(PendingPress(usage: entry.usage, modifiers: entry.modifiers, at: now))
+                }
+                held.removeAll()
+                return
+            }
             // A modifier-only press has no key usage of its own; record it as usage 0 so a
             // bare flagsChanged event can still be matched.
             let usages = key.usages.isEmpty ? [0] : key.usages
-            for usage in usages {
-                pending.append(PendingPress(usage: usage, modifiers: key.modifiers, at: now))
-            }
+            held = usages.map { PendingPress(usage: $0, modifiers: key.modifiers, at: now) }
+            pending.append(contentsOf: held)
 
         case .consumer(let consumer):
             // Every report refreshes the timestamp, so a device that repeats while a
             // button is held keeps the hold alive rather than ageing out of it.
             consumerAt = now
             consumerHeld = !consumer.isRelease
+            if let usage = consumer.usages.first { consumerUsage = usage }
 
         case .wheel(let mouse):
             pendingWheel.removeAll { now.timeIntervalSince($0.at) > window }
@@ -235,23 +256,69 @@ final class ExpressKeySuppressor {
 
         let now = Date()
         pending.removeAll { now.timeIntervalSince($0.at) > window }
+        // A hold with no release in sight is more likely a report that went missing than a
+        // finger resting on a button for ten seconds. Letting go of it gives the keyboard
+        // back rather than staying wrong indefinitely.
+        held.removeAll { now.timeIntervalSince($0.at) > holdLimit }
 
-        guard let index = pending.firstIndex(where: { press in
+        guard let press = (held + pending).first(where: { press in
             if press.usage == 0 {
                 // Modifier-only button: match the flags change it produced.
                 return type == .flagsChanged
             }
+            // A combination such as Ctrl+Z produces a flags change of its own, before and
+            // after the key. Swallowing the key while letting those through leaves the
+            // system believing Ctrl was pressed by hand.
+            if type == .flagsChanged { return press.modifiers != 0 }
             return HIDKeyCodes.matches(usage: press.usage, virtualKey: virtualKey)
         }) else {
             return nil
         }
 
-        let press = pending[index]
-        // Keep the entry for the release that follows, but not past the window.
-        if type == .keyUp || type == .flagsChanged {
-            pending.remove(at: index)
+        let source = ButtonSource.key(modifiers: press.modifiers, usage: press.usage)
+        switch action?(source) ?? .ignore {
+        case .passThrough:
+            return nil
+        case .ignore:
+            break
+        case .rightClick:
+            // Once per press. The same button produces a flags change, a key down and a
+            // key up, and clicking on each would fire three times.
+            if type == .keyDown { post(click: .right) }
+        case .middleClick:
+            if type == .keyDown { post(click: .center) }
+        }
+
+        if type == .keyUp {
+            pending.removeAll { $0.usage == press.usage && $0.modifiers == press.modifiers }
         }
         return HIDKeyCodes.name(usage: press.usage, modifiers: press.modifiers)
+    }
+
+    /// Sends a click where the pointer already is.
+    ///
+    /// Posted off the callback: a tap has a deadline, and an event posted from inside one
+    /// would re-enter this handler before it has returned. It comes back tagged with this
+    /// process, which the hardware-only guard in `handle` then ignores.
+    private func post(click button: CGMouseButton) {
+        let down: CGEventType
+        let up: CGEventType
+        switch button {
+        case .right: (down, up) = (.rightMouseDown, .rightMouseUp)
+        default: (down, up) = (.otherMouseDown, .otherMouseUp)
+        }
+
+        DispatchQueue.main.async {
+            guard let location = CGEvent(source: nil)?.location else { return }
+            for type in [down, up] {
+                guard let event = CGEvent(
+                    mouseEventSource: nil, mouseType: type,
+                    mouseCursorPosition: location, mouseButton: button
+                ) else { continue }
+                event.setIntegerValueField(.mouseEventClickState, value: 1)
+                event.post(tap: .cghidEventTap)
+            }
+        }
     }
 
     /// Matches a scroll event against the tablet's own wheel reports.
@@ -275,8 +342,15 @@ final class ExpressKeySuppressor {
             // those carry no direction to match on.
             return matchConsumerLocked(named: "scroll")
         }
+        let isUp = pendingWheel[index].isUp
+        switch action?(.wheel(up: isUp)) ?? .ignore {
+        case .passThrough: return nil
+        case .ignore: break
+        case .rightClick: post(click: .right)
+        case .middleClick: post(click: .center)
+        }
         pendingWheel.remove(at: index)
-        return "scroll \(delta > 0 ? "up" : "down")"
+        return "scroll \(isUp ? "up" : "down")"
     }
 
     /// Whether a consumer-control button on the tablet accounts for the event in hand.
@@ -303,6 +377,14 @@ final class ExpressKeySuppressor {
         // A button still down, or one just let go: macOS delivers the last of its events
         // slightly after the release report reaches us.
         guard consumerHeld || elapsed <= window else { return nil }
+
+        switch action?(.consumer(usage: consumerUsage)) ?? .ignore {
+        case .passThrough: return nil
+        case .ignore: break
+        // Only while the button is down, so the trailing release event does not click again.
+        case .rightClick: if consumerHeld { post(click: .right) }
+        case .middleClick: if consumerHeld { post(click: .center) }
+        }
         return name
     }
 }
