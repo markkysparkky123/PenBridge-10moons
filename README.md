@@ -83,10 +83,25 @@ which is the one operation here that could leave a tablet needing the vendor's o
 software to recover. Contributions welcome; see [Docs/PROTOCOL.md](Docs/PROTOCOL.md) for
 what the buttons currently send.
 
-There is an opt-in **Ignore the tablet's own buttons** switch that discards the
-keystrokes rather than replacing them, for anyone who finds the firmware shortcuts get
-in the way. It covers the keyboard-type buttons only — the touch strip sends media
-controls, which take a different path and pass through untouched.
+There is an opt-in **Ignore the tablet's own buttons** switch that discards what the
+buttons send rather than replacing it, for anyone who finds the firmware shortcuts get in
+the way. It covers all three kinds, which is worth spelling out because they are three
+genuinely different mechanisms and covering two of them looks identical to covering all:
+
+| Buttons | What they send | What macOS makes of it |
+|---|---|---|
+| Down the side | keystrokes | key events |
+| The touch strip | consumer-control usages | media keys (`NX_SYSDEFINED`) |
+| Scroll | a **mouse wheel**, on a second HID interface | scroll events |
+
+The last one is the reason this took two attempts. Those buttons are not keys at all: the
+tablet publishes a second HID interface that declares an ordinary mouse, and no digitizer
+usage appears anywhere on it. A driver that finds tablets by their digitizer usage — the
+correct way to do it — never opens that interface, so those buttons are invisible to it
+while working perfectly. See [Docs/PROTOCOL.md](Docs/PROTOCOL.md).
+
+Your own mouse and trackpad are unaffected: a scroll is discarded only when the tablet's
+wheel turned the same way a moment earlier.
 
 ## Requirements
 
@@ -170,6 +185,7 @@ $APP info               # detected tablets, parsed descriptor, pen layout
 $APP dump               # raw HID reports with a decoded breakdown
 $APP pressure           # live pressure meter: raw, configured band, mapped output
 $APP calibrate --apply  # measure the tablet's true limits and write them to the config
+$APP buttons            # what each tablet button sends, and what macOS makes of it
 $APP probe              # log the tablet events any driver is posting
 $APP nsprobe            # draw in a window; shows what an application actually receives
 ```
@@ -178,6 +194,13 @@ $APP nsprobe            # draw in a window; shows what an application actually r
 declare in their own descriptor; if yours does, the cursor will stop short of the screen
 edge. Trace all four physical edges of the active area and watch for the numbers to
 settle.
+
+`buttons` answers "why does this button do nothing / do the wrong thing". It shows the
+report the tablet sent and the event macOS made of it side by side, watching at two levels
+of the event stack, and on exit prints a table of button against effect. Your own typing
+and mouse are listed separately, so there is no need to keep your hands off the keyboard
+while using it. A button with a report but no event, or an event with no report, is the
+interesting case — that is what found the scroll buttons hiding on a second interface.
 
 `probe` is for comparing drivers. Run it while another driver is active to see exactly
 which event fields reach applications — useful when one drawing app sees pressure and

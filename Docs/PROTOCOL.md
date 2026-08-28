@@ -36,7 +36,11 @@ Composite device with three interfaces:
 |---|---|---|---|
 | 0 | Mass Storage (8 / 6 / 80) | 2 | Emulated CD-ROM holding the vendor installers |
 | 1 | HID (3) | 1 interrupt IN | Pen, express keys, consumer control |
-| 2 | HID (3) | 1 interrupt IN | Vendor configuration channel |
+| 2 | HID (3) | 1 interrupt IN | Vendor configuration channel **and a mouse with a wheel** |
+
+**Interface 2 is not only the configuration channel**, and assuming it is costs more than
+it sounds. It also declares an ordinary mouse — buttons, X, Y and a wheel — and that is
+where the scroll buttons report. See [Interface 2](#interface-2--report-descriptor) below.
 
 The CD-ROM interface is the "driver inside" gimmick — the tablet presents a read-only
 disc so Windows can autorun the installer. It is irrelevant to operating the pen and can
@@ -107,34 +111,112 @@ than a feature of this one.
 ## Report ID 2 — express keys
 
 A standard boot-keyboard layout: one modifier bitmap byte, one reserved byte, then an
-array of five key usages. The tablet's buttons are wired to fixed shortcuts in firmware
-and arrive as ordinary keystrokes.
+array of five key usages. Most of the tablet's buttons are wired to fixed shortcuts in
+firmware and arrive as ordinary keystrokes.
 
-Measured on a unit with 12 buttons down the left edge, pressed in order:
+Measured on a unit with buttons down the right edge, each pressed once, captured with
+`penbridge-cli buttons`:
 
-| # | Report | Key |
+| Report | Key | Marked on the case |
 |---|---|---|
-| 1 | `00 00 08` | `E` |
-| 2 | `00 00 05` | `B` |
-| 3 | `01 00 56` | Ctrl + Keypad − |
-| 4 | `01 00 57` | Ctrl + Keypad + |
-| 5 | `00 00 2F` | `[` |
-| 6 | `00 00 30` | `]` |
-| 7 | `00 00 2B` | Tab |
-| 8 | `00 00 2C` | Space |
-| 9 | `01 00 00` | Ctrl alone |
-| 10 | `04 00 00` | Alt alone |
-| 11 | `08 00 07` | Cmd + `D` |
+| `00 00 08` | `E` | `E` |
+| `00 00 05` | `B` | `B` |
+| `01 00 56` | Ctrl + Keypad − | `CTRL-` |
+| `01 00 57` | Ctrl + Keypad + | `CTRL+` |
+| `00 00 2F` | `[` | `[` |
+| `00 00 30` | `]` | `]` |
+| `00 00 2C` | Space | |
+| `01 00 00` | Ctrl alone | |
+| `04 00 00` | Alt alone | |
+| `08 00 07` | Cmd + `D` | |
+| `01 00 1C` | Ctrl + `Y` | |
+| `01 00 1D` | Ctrl + `Z` | |
 
-A photo-editing default set. Each button sends a distinct code, so they can be told
-apart.
+A photo-editing default set — undo, redo, brush, eraser, brush size, zoom. Each button
+sends a distinct code, so they can be told apart.
+
+Note what is **not** in this table: the two scroll buttons. They send nothing at all on
+this interface. See below.
+
+### Ctrl+Z will suspend whatever is in your terminal
+
+Worth stating because it costs an afternoon otherwise. A terminal turns Ctrl+Z into
+SIGTSTP, so pressing that button suspends any diagnostic running in the foreground —
+`penbridge-cli dump` stops dead, looking exactly like the tablet having gone silent. It
+has not; the shell says `zsh: suspended` and `fg` brings it back. `penbridge-cli buttons`
+ignores the signal for this reason.
 
 ## Report ID 4 — the touch strip
 
-Ten touch fields along the top edge, sending consumer-control usages: Mute (`0x00E2`),
-Volume Down (`0x00EA`), Volume Up (`0x00E9`), Media Player (`0x0183`), Play/Pause
-(`0x00CD`), Previous Track (`0x00B6`), Next Track (`0x00B5`), Browser Home (`0x0223`)
-and Calculator (`0x0192`). Nothing to do with drawing.
+Touch fields along the bottom edge, sending consumer-control usages. Each press is one
+16-bit usage, little-endian; releasing sends `00 00`. Measured:
+
+| Report | Usage | Meaning |
+|---|---|---|
+| `E2 00` | `0x00E2` | Mute |
+| `EA 00` | `0x00EA` | Volume Down |
+| `E9 00` | `0x00E9` | Volume Up |
+| `83 01` | `0x0183` | Media Player |
+| `CD 00` | `0x00CD` | Play/Pause |
+| `B6 00` | `0x00B6` | Previous Track |
+| `B5 00` | `0x00B5` | Next Track |
+| `23 02` | `0x0223` | Browser Home |
+| `92 01` | `0x0192` | Calculator |
+
+Nothing to do with drawing. macOS turns these into `NX_SYSDEFINED` events of subtype 8
+(`NX_SUBTYPE_AUX_CONTROL_BUTTONS`) rather than key presses, which is why a suppressor
+watching only the keyboard leaves them working.
+
+Three of them — Media Player, Browser Home and Calculator — produced no event at all on
+the machine this was measured on, though the tablet reported them normally.
+
+## Interface 2 — report descriptor
+
+```
+06a0ff0901a10185069508753f150026ff00090119002aff008100c0
+05010902a10185030901a1000509190129081500250195087501810205011581257f750895030930093109388106c0c0
+```
+
+| Report ID | Direction | Meaning |
+|---|---|---|
+| 6 | Input | Vendor page `0xFFA0`, 63-byte blocks — the configuration channel |
+| 3 | Input | **Mouse: 8 buttons, X, Y and Wheel** |
+
+## Report ID 3 — the scroll buttons
+
+The two buttons that scroll are not keys and not consumer controls. They are a **mouse
+wheel**, declared on this second interface as a textbook Generic Desktop mouse:
+
+```
+05 01 09 02  a1 01        Usage Page (Generic Desktop), Usage (Mouse), Collection
+85 03                     Report ID 3
+  09 01 a1 00             Usage (Pointer), Collection (Physical)
+  05 09 19 01 29 08       Usage Page (Button), Usage Minimum 1, Maximum 8
+  15 00 25 01 95 08 75 01 81 02       8 buttons, one bit each
+  05 01 15 81 25 7f 75 08 95 03       three signed bytes, −127…127
+  09 30 09 31 09 38 81 06             X, Y, Wheel — relative
+```
+
+Four payload bytes: a button bitmap, then X, Y and wheel as signed bytes. Pressing scroll
+up sends `00 00 00 01`, scroll down `00 00 00 FF`. macOS's own mouse driver turns these
+into ordinary scroll events, so the buttons work with no driver at all.
+
+**This is the trap.** The interface's `DeviceUsagePairs` are `{0xFFA0,1}`, `{0x01,2}` and
+`{0x01,1}` — **no digitizer usage anywhere on it**. A driver that finds tablets by their
+digitizer usage, which is the correct and portable way to do it, never opens this
+interface and never sees these buttons. They are then indistinguishable from buttons the
+driver has no idea about: the scroll plainly happens, and the driver swears nothing was
+pressed.
+
+Matching it on its own is not an option either — that would mean opening every mouse on
+the machine. PenBridge matches such devices, but adopts one only after a device with the
+same vendor and product has turned up carrying a pen. A real mouse never passes that test,
+and the ordering between a device's interfaces is not guaranteed, so candidates are held
+aside until the pen appears. See `TabletAuxInterface`.
+
+The vendor's own configuration file gives these two buttons the identifiers `FE` and `FD`,
+which are not valid HID keyboard usages (those stop at `0xE7`) — its way of naming buttons
+that do not arrive through the keyboard report.
 
 ## Seizing the device does not suppress these
 
