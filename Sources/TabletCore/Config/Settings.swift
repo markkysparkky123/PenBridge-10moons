@@ -55,6 +55,11 @@ public struct Settings: Codable, Equatable, Sendable {
     /// Measured coordinate limits; empty means trust the descriptor.
     public var calibration: Calibration
     /// Send the barrel switch as a right-click.
+    ///
+    /// Deliberately not in the menu. The tablet this was written for never sets that bit —
+    /// its pen's side buttons send keystrokes instead, and are configured under **Pen
+    /// buttons** — so offering a switch for it there would be a control that does nothing.
+    /// It stays on by default for tablets that do wire it.
     public var barrelSwitchRightClicks: Bool
     /// Take the tablet exclusively so macOS's own HID driver stops generating its own
     /// plain mouse events from the same pen. See `TabletDeviceMonitor.seizeDevice`.
