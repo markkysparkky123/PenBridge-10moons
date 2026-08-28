@@ -15,6 +15,17 @@ private let t501Descriptor: [UInt8] = decodeHex(
     """
 )
 
+/// The descriptor published by the tablet's *second* HID interface, read out of the same
+/// I/O Registry entry. It declares the vendor configuration channel and — the part that is
+/// easy to miss and matters a great deal — an ordinary mouse with a wheel, which is where
+/// this tablet's scroll buttons report.
+private let t501AuxDescriptor: [UInt8] = decodeHex(
+    """
+    06a0ff0901a10185069508753f150026ff00090119002aff008100c0\
+    05010902a10185030901a1000509190129081500250195087501810205011581257f750895030930093109388106c0c0
+    """
+)
+
 private func decodeHex(_ string: String) -> [UInt8] {
     let cleaned = string.filter(\.isHexDigit)
     return stride(from: 0, to: cleaned.count, by: 2).map { offset in
@@ -137,5 +148,132 @@ struct DecodeTests {
     func truncated() throws {
         let decoded = try layout().decode([0x40, 0x00, 0x08])
         #expect(decoded == nil)
+    }
+}
+
+@Suite("Tablet button decoding")
+struct ButtonDecodeTests {
+
+    private func expressKeys() throws -> ExpressKeyLayout {
+        try #require(ExpressKeyLayout(fields: HIDReportDescriptor.parse(t501Descriptor)))
+    }
+
+    private func consumerKeys() throws -> ConsumerKeyLayout {
+        try #require(ConsumerKeyLayout(fields: HIDReportDescriptor.parse(t501Descriptor)))
+    }
+
+    @Test("The keyboard buttons are report ID 2, boot-keyboard shaped")
+    func expressKeyShape() throws {
+        let layout = try expressKeys()
+        #expect(layout.reportID == 2)
+        // One modifier byte, one reserved byte, five key slots.
+        #expect(layout.payloadSize == 7)
+    }
+
+    @Test("A keyboard button press decodes to its usage and modifiers")
+    func expressKeyPress() throws {
+        // Button 3 of the measured set: Ctrl + Keypad −.
+        let event = try #require(expressKeys().decode([0x01, 0x00, 0x56, 0, 0, 0, 0]))
+        #expect(event.modifiers == 0x01)
+        #expect(event.usages == [0x56])
+        #expect(!event.isRelease)
+    }
+
+    @Test("An all-zero keyboard report is a release")
+    func expressKeyRelease() throws {
+        let event = try #require(expressKeys().decode([0, 0, 0, 0, 0, 0, 0]))
+        #expect(event.isRelease)
+    }
+
+    @Test("The scroll and touch-strip buttons are a separate consumer report")
+    func consumerShape() throws {
+        let layout = try consumerKeys()
+        // Report ID 4, a single 16-bit usage. This is the path that carries the buttons
+        // macOS turns into scrolling and media keys — not keystrokes, which is why
+        // watching only the keyboard misses them.
+        #expect(layout.reportID == 4)
+        #expect(layout.payloadSize == 2)
+    }
+
+    @Test("A consumer usage decodes little-endian, and zero is a release")
+    func consumerPress() throws {
+        let layout = try consumerKeys()
+
+        // Volume Up, usage 0x00E9.
+        let pressed = try #require(layout.decode([0xE9, 0x00]))
+        #expect(pressed.usages == [0x00E9])
+        #expect(!pressed.isRelease)
+
+        // Browser Home, usage 0x0223 — two bytes wide, so it catches a byte-order slip.
+        let wide = try #require(layout.decode([0x23, 0x02]))
+        #expect(wide.usages == [0x0223])
+
+        let released = try #require(layout.decode([0x00, 0x00]))
+        #expect(released.isRelease)
+    }
+
+    @Test("A truncated consumer report is rejected")
+    func consumerTruncated() throws {
+        #expect(try consumerKeys().decode([0xE9]) == nil)
+    }
+}
+
+@Suite("The tablet's second interface")
+struct AuxInterfaceTests {
+
+    private func mouse() throws -> MouseReportLayout {
+        try #require(MouseReportLayout(fields: HIDReportDescriptor.parse(t501AuxDescriptor)))
+    }
+
+    @Test("The scroll buttons are a mouse wheel, not keys")
+    func shape() throws {
+        let layout = try mouse()
+        // Report ID 3: eight buttons, then X, Y and Wheel as signed bytes.
+        #expect(layout.reportID == 3)
+        #expect(layout.payloadSize == 4)
+    }
+
+    @Test("This interface carries no digitizer usage, which is why it goes unnoticed")
+    func noDigitizer() {
+        let fields = HIDReportDescriptor.parse(t501AuxDescriptor)
+        #expect(!fields.contains { $0.usagePage == HIDUsagePage.digitizer.rawValue })
+        // Matching tablets by their digitizer usage — the sensible thing to do — therefore
+        // never opens it, and the scroll buttons look like they send nothing at all.
+        #expect(PenReportLayout(fields: fields) == nil)
+    }
+
+    @Test("Wheel movement is signed, so scrolling back is not a huge scroll forward")
+    func wheelDirection() throws {
+        let layout = try mouse()
+
+        let up = try #require(layout.decode([0x00, 0x00, 0x00, 0x01]))
+        #expect(up.wheel == 1)
+        #expect(up.buttons == 0)
+
+        let down = try #require(layout.decode([0x00, 0x00, 0x00, 0xFF]))
+        #expect(down.wheel == -1)
+
+        let idle = try #require(layout.decode([0x00, 0x00, 0x00, 0x00]))
+        #expect(idle.isIdle)
+    }
+
+    @Test("Buttons on that interface decode to a bitmap")
+    func buttons() throws {
+        let event = try #require(mouse().decode([0b0000_0101, 0x00, 0x00, 0x00]))
+        #expect(event.buttons == 0b0000_0101)
+        #expect(!event.isIdle)
+    }
+
+    @Test("A plain mouse descriptor with no wheel is not adopted")
+    func requiresWheel() {
+        // Buttons and axes only — nothing a tablet driver needs, and adopting it would
+        // mean opening the user's actual mouse.
+        let noWheel = decodeHex(
+            """
+            05010902a10185030901a100\
+            0509190129081500250195087501810205011581257f75089502093009318106c0c0
+            """
+        )
+        #expect(MouseReportLayout(fields: HIDReportDescriptor.parse(noWheel)) == nil)
     }
 }

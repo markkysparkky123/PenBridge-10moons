@@ -20,9 +20,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.engine = engine
 
         // The suppressor needs to know a tablet button was pressed before macOS turns
-        // it into a keystroke, which is the whole basis for telling the two apart.
-        engine.onExpressKey = { [weak self] event in
-            self?.suppressor.noteExpressKey(event)
+        // it into a keystroke or a scroll, which is the whole basis for telling the
+        // tablet's input apart from the user's own.
+        engine.onTabletButton = { [weak self] event in
+            self?.suppressor.note(event)
         }
         self.statusItem = StatusItemController(engine: engine, suppressor: suppressor)
         engine.start()

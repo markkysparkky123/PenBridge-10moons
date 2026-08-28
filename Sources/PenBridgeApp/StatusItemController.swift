@@ -5,9 +5,13 @@ import TabletCore
 /// The menu-bar presence: current status, the switches worth reaching quickly,
 /// and a way out.
 @MainActor
-final class StatusItemController {
+final class StatusItemController: NSObject, NSMenuDelegate {
 
     private let statusItem: NSStatusItem
+    /// One menu for the lifetime of the app, refilled just before it opens. Rebuilding it
+    /// on every change instead would leave the discard counter showing whatever it read
+    /// last, which for a feature whose whole job is invisible is the wrong thing to show.
+    private let menu = NSMenu()
     private let engine: TabletDriverEngine
     private let suppressor: ExpressKeySuppressor
     /// What the suppressor has discarded, shown in the menu so the feature is visibly
@@ -27,6 +31,11 @@ final class StatusItemController {
         self.suppressor = suppressor
         self.settings = engine.settings
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        super.init()
+
+        menu.autoenablesItems = false
+        menu.delegate = self
+        statusItem.menu = menu
 
         statusItem.button?.image = NSImage(
             systemSymbolName: "pencil.and.outline", accessibilityDescription: "PenBridge"
@@ -34,8 +43,13 @@ final class StatusItemController {
         statusItem.button?.image?.isTemplate = true
 
         engine.onStateChange = { [weak self] state in
+            // Set outside the hop to the main actor: the suppressor's tap runs on the
+            // main run loop and must never be left believing a tablet is attached after
+            // it has gone, however briefly.
+            suppressor.isTabletConnected = state != .waitingForTablet
             Task { @MainActor in self?.render(state) }
         }
+        suppressor.isTabletConnected = engine.state != .waitingForTablet
         suppressor.onSuppressed = { [weak self] key in
             guard let self else { return }
             self.suppressedCount += 1
@@ -53,9 +67,12 @@ final class StatusItemController {
         rebuildMenu()
     }
 
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        rebuildMenu()
+    }
+
     private func rebuildMenu() {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
+        menu.removeAllItems()
 
         let status: String
         switch engine.state {
@@ -130,18 +147,27 @@ final class StatusItemController {
         suppress.target = self
         suppress.state = settings.suppressExpressKeys ? .on : .off
         suppress.toolTip = """
-            The tablet's buttons send fixed keyboard shortcuts from firmware, and macOS \
-            acts on them before this driver sees anything. Discarding them is the first \
-            step towards putting your own actions on those buttons. It works by watching \
-            keystrokes and dropping the ones a tablet button just caused — so it is off \
-            until you ask for it.
+            The tablet's buttons send fixed shortcuts from firmware — keystrokes from the \
+            side buttons, scrolling and media keys from the rest — and macOS acts on them \
+            before this driver sees anything. Discarding them is the first step towards \
+            putting your own actions on those buttons. It works by watching input and \
+            dropping the events a tablet button just caused — so it is off until you ask \
+            for it.
             """
         menu.addItem(suppress)
 
         if settings.suppressExpressKeys {
-            let detail = suppressedCount == 0
-                ? "    nothing discarded yet — press a tablet button"
-                : "    discarded \(suppressedCount), last: \(lastSuppressed ?? "—")"
+            // The tap can fail to start — it needs Accessibility — and at launch there is
+            // nobody to show an alert to. Saying so here is the difference between a
+            // feature that is off and one that is broken.
+            let detail: String
+            if !suppressor.isRunning {
+                detail = "    not watching — needs Accessibility"
+            } else if suppressedCount == 0 {
+                detail = "    nothing discarded yet — press a tablet button"
+            } else {
+                detail = "    discarded \(suppressedCount), last: \(lastSuppressed ?? "—")"
+            }
             let item = NSMenuItem(title: detail, action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
@@ -179,8 +205,6 @@ final class StatusItemController {
         let quit = NSMenuItem(title: "Quit PenBridge", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
-
-        statusItem.menu = menu
     }
 
     private func submenu<T>(

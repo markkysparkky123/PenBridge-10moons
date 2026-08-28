@@ -10,6 +10,7 @@ public enum HIDUsagePage: UInt32, Sendable {
     case genericDesktop = 0x01
     case keyboard = 0x07
     case led = 0x08
+    case button = 0x09
     case consumer = 0x0C
     case digitizer = 0x0D
 }
@@ -30,6 +31,8 @@ public enum DigitizerUsage: UInt32, Sendable {
 public enum GenericDesktopUsage: UInt32, Sendable {
     case x = 0x30
     case y = 0x31
+    case wheel = 0x38
+    case mouse = 0x02
 }
 
 /// One data field extracted from a report descriptor.

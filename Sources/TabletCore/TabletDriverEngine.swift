@@ -16,9 +16,9 @@ public final class TabletDriverEngine {
     /// Called for each press or release of the tablet's own buttons, on the HID thread.
     ///
     /// Reported whether or not the driver acts on them: knowing a button was pressed,
-    /// before macOS turns it into a keystroke, is what lets that keystroke be
+    /// before macOS turns it into a keystroke or a scroll, is what lets that event be
     /// recognised afterwards.
-    public var onExpressKey: ((ExpressKeyEvent) -> Void)?
+    public var onTabletButton: ((TabletButtonEvent) -> Void)?
 
     public private(set) var state: State = .waitingForTablet {
         didSet { if state != oldValue { onStateChange?(state) } }
@@ -42,6 +42,9 @@ public final class TabletDriverEngine {
         monitor.onDetach = { [weak self] device in self?.detach(device) }
         monitor.onReport = { [weak self] device, reportID, payload in
             self?.process(device: device, reportID: reportID, payload: payload)
+        }
+        monitor.onAuxReport = { [weak self] _, event in
+            self?.onTabletButton?(.wheel(event))
         }
     }
 
@@ -130,7 +133,13 @@ public final class TabletDriverEngine {
     private func process(device: TabletDevice, reportID: UInt8, payload: [UInt8]) {
         if let keys = device.expressKeys, reportID == keys.reportID,
            let event = keys.decode(payload) {
-            onExpressKey?(event)
+            onTabletButton?(.keyboard(event))
+            return
+        }
+
+        if let keys = device.consumerKeys, reportID == keys.reportID,
+           let event = keys.decode(payload) {
+            onTabletButton?(.consumer(event))
             return
         }
 
